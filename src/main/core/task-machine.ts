@@ -16,6 +16,27 @@ const SEEN_LIMIT = 120_000
 /** 同一会话内两次事件间隔超过该阈值即视为新任务（连续活动段切分） */
 const BURST_GAP_MS = 10 * 60_000
 /** 状态来源的可信度：hook 最权威，process 最粗，none 表示没有运行时通道 */
+/** 服务商名不是模型名：个别数据源会用它兜底，写入后界面会出现「模型 = openai」 */
+const MODEL_PROVIDER_NAMES = new Set([
+  'openai',
+  'anthropic',
+  'google',
+  'azure',
+  'vertex',
+  'bedrock',
+  'custom',
+  'deepseek',
+  'tencent',
+  'zhipu'
+])
+
+function usableModel(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const name = value.trim()
+  if (!name || MODEL_PROVIDER_NAMES.has(name.toLowerCase())) return undefined
+  return name
+}
+
 const STATE_WEIGHT: Record<StateSource, number> = {
   hook: 5,
   bridge: 4,
@@ -175,7 +196,9 @@ export class TaskMachine {
     if (delta.project && task.project !== delta.project) task.project = delta.project
 
     const modelBefore = task.model
-    if (delta.model) task.model = delta.model
+    // 统一的模型守卫：任何适配器误传 provider 名都不会污染任务
+    const nextModel = usableModel(delta.model)
+    if (nextModel) task.model = nextModel
 
     const input = positive(delta.inputTokens)
     const output = positive(delta.outputTokens)
@@ -335,7 +358,8 @@ export class TaskMachine {
     }
     if (signal.workspace && !task.workspace) task.workspace = signal.workspace
     if (signal.project && !task.project) task.project = signal.project
-    if (signal.model) task.model = signal.model
+    const signalModel = usableModel(signal.model)
+    if (signalModel) task.model = signalModel
     const previousStateAt = task.lastStateAt ?? 0
     task.lastStateAt = Math.max(previousStateAt, eventTs)
 

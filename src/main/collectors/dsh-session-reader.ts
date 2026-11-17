@@ -151,7 +151,7 @@ export function parseDshSession(buffer: Buffer, sessionId: string): DshSession |
       case 'request/header': {
         const header = isRecord(data.header) ? data.header : null
         const config = header && isRecord(header.config) ? header.config : null
-        const model = config ? str(config.model) : undefined
+        const model = config ? (str(config.model) ?? str(config.model_name)) : undefined
         if (model) session.model = model
         break
       }

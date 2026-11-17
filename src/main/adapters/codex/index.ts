@@ -264,8 +264,30 @@ export class CodexAdapter extends BaseAdapter {
     const session = this.sessions.get(meta.relPath) ?? this.fallbackSession(meta.relPath)
     this.sessions.set(meta.relPath, session)
 
-    if (payload && typeof payload.model === 'string' && payload.model) {
-      session.model = payload.model
+    // 模型名可能出现在 session_meta / turn_context / compacted 等不同位置，
+    // 且 session_meta 常常只给 model_provider（"openai"）而不给 model。
+    // 这里统一扫一遍，避免把 provider 当成模型名展示。
+    const foundModel = extractModel(payload, obj)
+    if (foundModel && foundModel !== session.model) {
+      const previous = session.model
+      session.model = foundModel
+      // 已经建过任务时，把新模型同步过去（无用量事件，只更新元信息）
+      if (previous) {
+        this.push({
+          tool: this.id,
+          externalSessionId: session.sessionId,
+          ts: Date.now(),
+          title: this.titleFor(session),
+          workspace: session.cwd,
+          project: this.projectFor(session),
+          model: foundModel,
+          authoritativeTitle: true,
+          tokensSource: 'unavailable',
+          skipEventLog: true,
+          dedupeKey: `model:${session.sessionId}:${foundModel}`,
+          ...emptyUsage()
+        })
+      }
     }
 
     // 文件此刻仍在被写入 = 该会话正在工作。这是运行时 IO 观测，
@@ -464,7 +486,8 @@ export class CodexAdapter extends BaseAdapter {
       workspace: session.cwd,
       project: this.projectFor(session),
       authoritativeTitle: true,
-      model: session.model ?? session.provider,
+      // 没有真实模型时留空：provider 名（openai）不是模型名，写成它会覆盖已知真值
+      model: isModelName(session.model) ? session.model : undefined,
       inputTokens: billableInput,
       outputTokens: output,
       cacheReadTokens: cached,
@@ -490,6 +513,43 @@ function num(value: unknown): number {
 
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+/**
+ * 从事件 payload 里挖出真实模型名。
+ * 跳过 provider 名（openai / anthropic / google 等）与空值，只认带标识符特征的模型 id。
+ */
+const PROVIDER_NAMES = new Set(['openai', 'anthropic', 'google', 'azure', 'vertex', 'bedrock', 'custom'])
+
+function isModelName(value: string | undefined): boolean {
+  if (!value) return false
+  return !PROVIDER_NAMES.has(value.trim().toLowerCase())
+}
+
+function extractModel(payload: unknown, whole: unknown): string | null {
+  const seen = new Set<unknown>()
+  const walk = (node: unknown, depth: number): string | null => {
+    if (!node || typeof node !== 'object' || depth > 4 || seen.has(node)) return null
+    seen.add(node)
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const hit = walk(item, depth + 1)
+        if (hit) return hit
+      }
+      return null
+    }
+    const record = node as Record<string, unknown>
+    for (const [key, value] of Object.entries(record)) {
+      if ((key === 'model' || key === 'modelId' || key === 'model_name') && typeof value === 'string') {
+        const name = value.trim()
+        if (name && !PROVIDER_NAMES.has(name.toLowerCase())) return name
+      }
+      const hit = walk(value, depth + 1)
+      if (hit) return hit
+    }
+    return null
+  }
+  return walk(payload, 0) ?? walk(whole, 0)
 }
 
 function parseTs(value: unknown): number | null {
