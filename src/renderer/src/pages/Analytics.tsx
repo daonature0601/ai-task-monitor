@@ -8,12 +8,38 @@ import { Card, Metric, SectionTitle, ToolAvatar } from '../components/ui/atoms'
 import { CacheEfficiency, CostTrend, useChartReady } from '../components/charts'
 import { cn, toolName } from '../lib/utils'
 
-type RangeKey = 'today' | 'week' | 'month'
+type RangeKey = 'today' | 'week' | 'month' | 'custom'
 
-const RANGE_LABEL: Record<RangeKey, string> = { today: '今日', week: '近 7 天', month: '近 30 天' }
+const RANGE_LABEL: Record<RangeKey, string> = {
+  today: '今日',
+  week: '近 7 天',
+  month: '近 30 天',
+  custom: '自定义'
+}
 
-function resolveRange(key: RangeKey): { from: number; to: number } {
-  const to = Date.now()
+/** 本地日期字符串（YYYY-MM-DD），与 dayKey 保持一致 */
+function localDay(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+function resolveRange(
+  key: RangeKey,
+  custom?: { from: string; to: string }
+): { from: number; to: number } {
+  const now = Date.now()
+  if (key === 'custom' && custom?.from && custom?.to) {
+    const rawFrom = new Date(`${custom.from}T00:00:00`).getTime()
+    const rawTo = new Date(`${custom.to}T23:59:59.999`).getTime()
+    if (Number.isFinite(rawFrom) && Number.isFinite(rawTo)) {
+      // 起止颠倒时自动纠正，未来时间点按当前时间截断
+      const from = Math.min(rawFrom, rawTo)
+      const to = Math.min(Math.max(rawFrom, rawTo), now)
+      return { from, to }
+    }
+  }
+  const to = now
   if (key === 'today') {
     const start = new Date(to)
     start.setHours(0, 0, 0, 0)
@@ -27,6 +53,8 @@ export function Analytics(): JSX.Element {
   const notify = useMonitor((s) => s.notify)
   const openDrawer = useMonitor((s) => s.openDrawer)
   const [range, setRange] = useState<RangeKey>('week')
+  const [customFrom, setCustomFrom] = useState(() => localDay(Date.now() - 6 * 86_400_000))
+  const [customTo, setCustomTo] = useState(() => localDay(Date.now()))
   const [stats, setStats] = useState<StatsPayload | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -35,7 +63,7 @@ export function Analytics(): JSX.Element {
 
   useEffect(() => {
     let disposed = false
-    const { from, to } = resolveRange(range)
+    const { from, to } = resolveRange(range, { from: customFrom, to: customTo })
     setLoading(true)
     window.monitor
       .getStats(from, to)
@@ -49,7 +77,7 @@ export function Analytics(): JSX.Element {
     return () => {
       disposed = true
     }
-  }, [range, snapshot?.summary.todayCostUsd])
+  }, [range, customFrom, customTo, snapshot?.summary.todayCostUsd])
 
   const totals = stats?.totals
   const chartReady = useChartReady()
@@ -60,7 +88,7 @@ export function Analytics(): JSX.Element {
   )
 
   const exportCsv = async (): Promise<void> => {
-    const { from, to } = resolveRange(range)
+    const { from, to } = resolveRange(range, { from: customFrom, to: customTo })
     const result = await window.monitor.exportCsv(from, to)
     notify(
       result.saved ? `已导出 ${result.rows ?? 0} 条记录` : '已取消导出',
@@ -71,20 +99,54 @@ export function Analytics(): JSX.Element {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex rounded-lg border border-white/[0.07] bg-white/[0.03] p-0.5">
-          {(Object.keys(RANGE_LABEL) as RangeKey[]).map((key) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setRange(key)}
-              className={cn(
-                'rounded-md px-3 py-1 text-caption transition-colors',
-                range === key ? 'bg-white/[0.09] text-fg-hi' : 'text-fg-lo hover:text-fg-mid'
-              )}
-            >
-              {RANGE_LABEL[key]}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-white/[0.07] bg-white/[0.03] p-0.5">
+            {(Object.keys(RANGE_LABEL) as RangeKey[]).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRange(key)}
+                className={cn(
+                  'rounded-md px-3 py-1 text-caption transition-colors',
+                  range === key ? 'bg-white/[0.09] text-fg-hi' : 'text-fg-lo hover:text-fg-mid'
+                )}
+              >
+                {RANGE_LABEL[key]}
+              </button>
+            ))}
+          </div>
+
+          {range === 'custom' && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-0.5">
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                className="field h-[24px] w-[124px] px-1.5 py-0 text-caption [color-scheme:dark]"
+              />
+              <span className="text-caption text-fg-lo">至</span>
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom}
+                max={localDay(Date.now())}
+                onChange={(event) => setCustomTo(event.target.value)}
+                className="field h-[24px] w-[124px] px-1.5 py-0 text-caption [color-scheme:dark]"
+              />
+              <span className="num text-[10px] text-fg-lo">
+                {Math.max(
+                  1,
+                  Math.round(
+                    (new Date(`${customTo}T00:00:00`).getTime() -
+                      new Date(`${customFrom}T00:00:00`).getTime()) /
+                      86_400_000
+                  ) + 1
+                )}{' '}
+                天
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="num text-caption text-fg-lo">{loading ? '统计中…' : '已更新'}</span>

@@ -344,6 +344,48 @@ async function captureUi(win: Electron.BrowserWindow): Promise<void> {
       }
 
       if (label === '统计') {
+        // 验证自定义区间：把起止都设为今天，结果应与「今日」一致
+        const rangeProbe = await win.webContents.executeJavaScript(
+          `(async () => {
+             const readCost = () => {
+               const p = Array.from(document.querySelectorAll('p'))
+                 .find((el) => (el.textContent || '').trim() === '区间费用');
+               const card = p ? p.closest('.glass') : null;
+               if (!card) return 'n/a';
+               const m = (card.textContent || '').match(/[¥$][0-9,]*(\.[0-9]+)?/);
+               return m ? m[0] : 'n/a';
+             };
+             const clickRange = (label) => {
+               const btn = Array.from(document.querySelectorAll('button'))
+                 .find((b) => (b.textContent || '').trim() === label);
+               if (btn) btn.click();
+             };
+             const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+             clickRange('今日');
+             await wait(900);
+             const todayCost = readCost();
+             clickRange('自定义');
+             await wait(400);
+             const inputs = Array.from(document.querySelectorAll('input[type=date]'));
+             const setValue = (el, v) => {
+               const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+               setter.call(el, v);
+               el.dispatchEvent(new Event('input', { bubbles: true }));
+             };
+             const d = new Date();
+             const pad = (n) => String(n).padStart(2, '0');
+             const today = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+             if (inputs[0]) setValue(inputs[0], today);
+             if (inputs[1]) setValue(inputs[1], today);
+             await wait(1200);
+             const customCost = readCost();
+             return JSON.stringify({ inputs: inputs.length, todayCost, customCost, equal: todayCost === customCost });
+           })()`
+        )
+        console.log('[smoke] custom-range', rangeProbe)
+      }
+
+      if (label === '统计') {
         const diag = await win.webContents.executeJavaScript(
           `(() => {
              const areas = document.querySelectorAll('.recharts-area-area');
