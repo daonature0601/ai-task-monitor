@@ -502,11 +502,12 @@ export class TaskMachine {
     // 界面据 costKnown 显示 "—"，不做任何推算。
     const billable =
       (task.tokensSource === 'native' || task.tokensSource === 'bridge') && !price.pending
-    task.costKnown = billable
     // 费用在 ingest() 里按事件累加，这里**不再**用累计 token 重算，
     // 否则 token 重复导入 / 模型迟到的历史任务会与事件流水对不上。
-    // 只有不可计价时才清零。
-    if (!billable) task.costUsd = 0
+    //
+    // 不清零：有些任务 tokens_source 是 unavailable（心跳类），但流水里带着
+    // 历史费用；清零会让任务显示 0 而统计页有金额，两者对不上。
+    task.costKnown = billable || task.costUsd > 0
     task.cacheHitRate = computeCacheHitRate(task)
     task.durationMs = this.computeDuration(task, now)
     task.alerts = evaluateTask(task, this.settings, now)

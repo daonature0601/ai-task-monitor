@@ -89,11 +89,6 @@ ON CONFLICT(id) DO UPDATE SET
   last_event_at = MAX(excluded.last_event_at, tasks.last_event_at),
   ended_at = COALESCE(excluded.ended_at, tasks.ended_at),
   duration_ms = excluded.duration_ms,
-  input_tokens = excluded.input_tokens,
-  output_tokens = excluded.output_tokens,
-  cache_read_tokens = excluded.cache_read_tokens,
-  cache_write_tokens = excluded.cache_write_tokens,
-  reasoning_tokens = excluded.reasoning_tokens,
   cost_usd = excluded.cost_usd,
   cost_known = excluded.cost_known,
   state_source = excluded.state_source,
@@ -106,8 +101,6 @@ ON CONFLICT(id) DO UPDATE SET
     WHEN tasks.tokens_source IN ('native', 'bridge') THEN tasks.tokens_source
     ELSE excluded.tokens_source
   END,
-  -- 以内存状态为准：心跳事件不计入，若用 MAX 则历史计数永远无法回落
-  event_count = excluded.event_count,
   updated_at = excluded.updated_at
 `
 
@@ -124,11 +117,12 @@ function toParams(task: TaskSnapshot): Record<string, unknown> {
     lastEventAt: task.lastEventAt,
     endedAt: task.endedAt ?? null,
     durationMs: task.durationMs,
-    inputTokens: task.inputTokens,
-    outputTokens: task.outputTokens,
-    cacheReadTokens: task.cacheReadTokens,
-    cacheWriteTokens: task.cacheWriteTokens,
-    reasoningTokens: task.reasoningTokens,
+    // token 由 usage_events 聚合，新建行先置 0，随后由事件增量累加
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0,
     costUsd: task.costUsd,
     costKnown: task.costKnown ? 1 : 0,
     stateSource: task.stateSource,
@@ -137,7 +131,7 @@ function toParams(task: TaskSnapshot): Record<string, unknown> {
     turnEndedAt: task.turnEndedAt ?? null,
     project: task.project ?? null,
     tokensSource: task.tokensSource,
-    eventCount: task.eventCount,
+    eventCount: 0,
     updatedAt: Date.now()
   }
 }

@@ -24,11 +24,25 @@ VALUES
 export function insertUsageEvents(db: Database.Database, rows: UsageEventRow[]): number {
   if (rows.length === 0) return 0
   const stmt = db.prepare(INSERT_SQL)
+  // 任务上的 token 是事件流水的聚合结果：只在真正插入成功时累加，
+  // 重复 dedupeKey 被 IGNORE 时 changes=0，不会重复计入。
+  const bump = db.prepare(`
+    UPDATE tasks SET
+      input_tokens = input_tokens + @inputTokens,
+      output_tokens = output_tokens + @outputTokens,
+      cache_read_tokens = cache_read_tokens + @cacheReadTokens,
+      cache_write_tokens = cache_write_tokens + @cacheWriteTokens,
+      reasoning_tokens = reasoning_tokens + @reasoningTokens,
+      event_count = event_count + 1
+    WHERE id = @taskId`)
   let inserted = 0
   const tx = db.transaction((list: UsageEventRow[]) => {
     for (const row of list) {
       const info = stmt.run(row)
-      inserted += info.changes
+      if (info.changes > 0) {
+        bump.run(row)
+        inserted += 1
+      }
     }
   })
   tx(rows)

@@ -41,7 +41,7 @@ import { buildSnapshot } from './core/snapshot'
 import { evaluateTask } from './core/alerts'
 import type { CursorStore } from './collectors/jsonl-tailer'
 
-const EVENTS_COST_VERSION = 9
+const EVENTS_COST_VERSION = 11
 
 export interface RuntimeHooks {
   onSnapshot: (snapshot: SnapshotPayload) => void
@@ -141,6 +141,11 @@ export function createRuntime(
   } catch (error) {
     console.error('[runtime] align codex titles failed', error)
   }
+
+  // 孤儿事件清理：任务被删除（重建索引、手工清理）后，它的用量流水会留在表里，
+  // 造成「任务累计 token ≠ 事件总量」。事件必须挂在存在的任务上。
+  const orphans = db.prepare('DELETE FROM usage_events WHERE task_id NOT IN (SELECT id FROM tasks)').run()
+  if (orphans.changes > 0) console.log(`[db] removed ${orphans.changes} orphan events`)
 
   // 事件级费用回填：必须在 hydrate 之前完成 —— 否则内存里装载的是旧的任务费用，
   // 下一次落盘又会把它写回去，重算等于没做。

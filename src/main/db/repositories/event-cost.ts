@@ -76,11 +76,17 @@ export function recomputeEventCosts(
 
   run()
 
-  // 事件价变了，任务上的 cost_usd 是事件求和的结果，必须一起刷新；
-  // 否则改了价目表后事件已重算、界面仍显示旧金额（0 或旧值）。
+  // 任务的用量与费用都应从事件流水派生 —— 它们是同一份数据的两种视图。
+  // 这既修掉「改了价目表但界面不变」，也让历史上重复累加的 token 回到真值。
   db.prepare(
     `UPDATE tasks
-        SET cost_usd = COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+        SET input_tokens = COALESCE((SELECT SUM(e.input_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+            output_tokens = COALESCE((SELECT SUM(e.output_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+            cache_read_tokens = COALESCE((SELECT SUM(e.cache_read_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+            cache_write_tokens = COALESCE((SELECT SUM(e.cache_write_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+            reasoning_tokens = COALESCE((SELECT SUM(e.reasoning_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+            event_count = COALESCE((SELECT COUNT(*) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+            cost_usd = COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0),
             cost_known = CASE
               WHEN COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0) > 0
               THEN 1 ELSE cost_known END`
