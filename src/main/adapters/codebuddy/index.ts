@@ -38,6 +38,8 @@ export class CodeBuddyAdapter extends BaseAdapter {
   /** convId → 项目名 */
   private ideProjects = new Map<string, string>()
   private ideProjectsAt = 0
+  /** 已计入的请求指纹：同一会话的多个副本（切号复制）只算一次 */
+  private readonly ideFingerprints = new Set<string>()
   /** 上一轮仍然活跃的对话 id，用于发结束信号 */
   private activeSessions = new Set<string>()
   private readonly models = new Map<string, string>()
@@ -139,6 +141,9 @@ export class CodeBuddyAdapter extends BaseAdapter {
 
       for (const request of requests) {
         if (request.ts <= since) continue
+        // 副本之间逐字重放，指纹相同；跨文件、跨轮扫描都只计一次
+        if (this.ideFingerprints.has(request.fingerprint)) continue
+        this.ideFingerprints.add(request.fingerprint)
         this.push({
           tool: this.id,
           externalSessionId: conversation.conversationId,
@@ -156,7 +161,7 @@ export class CodeBuddyAdapter extends BaseAdapter {
           // 每次请求都是一轮问答，用它刷新「本轮开始」
           keepSession: true,
           turnStart: true,
-          dedupeKey: `cbide:${conversation.conversationId}:${request.requestId}`
+          dedupeKey: `cbide:${request.fingerprint}`
         })
       }
 
@@ -178,6 +183,7 @@ export class CodeBuddyAdapter extends BaseAdapter {
         })
       }
 
+      if (this.ideFingerprints.size > 200_000) this.ideFingerprints.clear()
       const maxTs = Math.max(requests[requests.length - 1].ts, last.endTs)
       ctx.cursors.set(cursorKey, Math.max(since, maxTs), null, conversation.mtimeMs)
     }

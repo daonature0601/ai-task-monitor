@@ -88,6 +88,15 @@ export function turnElapsed(
   return Math.max(0, end - start)
 }
 
+/**
+ * 任务副标题：项目 · 模型。
+ * 两者都可能缺失（如 CodeBuddy IDE 不落盘模型名），此时用固定文案兜底，
+ * 避免各处一个写「—」、一个写「未上报」。
+ */
+export function taskSubtitle(task: { project?: string; model?: string }): string {
+  return `${task.project ?? '项目未知'} · ${task.model ?? '模型未知'}`
+}
+
 /** 保留 1 位；null 显示 — */
 export function formatRate(rate: number | null | undefined): string {
   if (rate === null || rate === undefined || !Number.isFinite(rate)) return '—'

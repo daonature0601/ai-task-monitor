@@ -73,7 +73,7 @@ export function LiveTaskCard({
             <p className="mt-0.5 truncate text-caption text-fg-lo">
               {task.project ? <span className="text-fg-mid">{task.project}</span> : '项目未知'}
               <span className="mx-1.5 text-fg-lo/50">·</span>
-              {task.model ?? '模型未上报'}
+              {task.model ?? '模型未知'}
             </p>
           </div>
         </div>

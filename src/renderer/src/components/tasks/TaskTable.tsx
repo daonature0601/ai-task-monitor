@@ -8,6 +8,7 @@ import {
   formatTimeShort,
   formatTokens,
   formatTokensFull,
+  taskSubtitle,
   STATUS_HINT,
   STATUS_LABEL
 } from '@shared/format'
@@ -77,7 +78,7 @@ export function TaskTable({
                     <div className="min-w-0">
                       <p className="truncate text-fg-hi">{task.title}</p>
                       <p className="truncate text-caption text-fg-lo">
-                        {[task.project, task.model].filter(Boolean).join(' · ') || '—'}
+                        {taskSubtitle(task)}
                       </p>
                     </div>
                   </div>

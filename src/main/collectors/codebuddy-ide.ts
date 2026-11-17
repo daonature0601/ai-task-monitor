@@ -33,6 +33,8 @@ export interface CbIdeRequest {
   ts: number
   /** 这一轮结束时间：取下一次请求的起点；最后一条由调用方用文件 mtime 补 */
   endTs: number
+  /** 跨副本去重指纹：时间戳 + 四类用量（副本之间逐字重放，指纹相同） */
+  fingerprint: string
   usage: CbIdeUsage
 }
 
@@ -109,6 +111,15 @@ export async function listCbIdeConversations(root: string): Promise<CbIdeConvers
   return out
 }
 
+/** 按顺序取第一个 > 0 的数值；全为 0/缺失时返回 0 */
+function positive(object: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    const value = num(object[key])
+    if (value > 0) return value
+  }
+  return 0
+}
+
 function num(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
@@ -135,29 +146,36 @@ export async function readCbIdeRequests(file: CbIdeConversation): Promise<CbIdeR
   const requests = Array.isArray(parsed.requests) ? parsed.requests : []
 
   const out: CbIdeRequest[] = []
+  let lastTs = 0
   for (const item of requests) {
     if (!isRecord(item)) continue
     const usage = isRecord(item.usage) ? item.usage : null
     if (!usage) continue
 
     const total = num(usage.inputTokens)
-    const cacheRead = num(usage.cacheTokens)
+    // 与 workbuddy-switch 一致：优先取**正值**，避免陈旧的 0 掩盖真实命中
+    const cacheRead = positive(usage, ['cacheTokens', 'cacheReadInputTokens', 'cache_read_input_tokens'])
     const miss = num(usage.cachedMissTokens)
     const input = miss > 0 ? miss : Math.max(0, total - cacheRead)
     const output = num(usage.outputTokens)
     const cacheWrite = num(usage.cachedWriteTokens)
     if (input + output + cacheRead + cacheWrite === 0) continue
 
-    const ts = num(item.startedAt) || num(item.timestamp)
-    if (!ts) continue
+    // 实测有约 29% 的请求没有 startedAt：不能直接丢弃，否则用量凭空少一截。
+    // 按顺序沿用上一条请求的时间；整份都没有时间时退到文件 mtime。
+    const parsedTs = num(item.startedAt) || num(item.timestamp)
+    const ts = parsedTs || lastTs || file.mtimeMs
 
+    const requestId = typeof item.id === 'string' && item.id ? item.id : `${ts}`
     out.push({
       conversationId: file.conversationId,
-      requestId: typeof item.id === 'string' && item.id ? item.id : `${ts}`,
+      requestId,
       ts,
       endTs: 0,
+      fingerprint: `${ts}:${input}:${output}:${cacheRead}:${cacheWrite}`,
       usage: { input, output, cacheRead, cacheWrite }
     })
+    lastTs = ts
   }
   out.sort((a, b) => a.ts - b.ts)
   // 一次请求的「结束」就是下一次请求的开始

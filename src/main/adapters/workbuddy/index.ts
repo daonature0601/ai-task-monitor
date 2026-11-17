@@ -183,19 +183,18 @@ export class WorkBuddyAdapter extends BaseAdapter {
 
     // WorkBuddy 用的字段名与 OpenAI 不同：命中/写入都在 prompt_cache_* 上，
     // cache_read_input_tokens 基本恒为 0，不能拿它当主口径。
-    const cached = num(
-      usage.prompt_cache_hit_tokens ??
-        usage.cache_read_input_tokens ??
-        (isRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details.cached_tokens : 0)
-    )
-    const cacheWrite = num(usage.prompt_cache_write_tokens ?? usage.cache_creation_input_tokens)
+    const cached = positive(usage, ['prompt_cache_hit_tokens', 'cache_read_input_tokens'])
+    const cacheWrite = positive(usage, ['prompt_cache_write_tokens', 'cache_write_input_tokens', 'cache_creation_input_tokens'])
     const prompt = num(usage.prompt_tokens)
     const miss = num(usage.prompt_cache_miss_tokens)
     const input = miss > 0 ? miss : Math.max(0, prompt - cached)
     const output = num(usage.completion_tokens)
-    const reasoning = isRecord(usage.completion_tokens_details)
-      ? num(usage.completion_tokens_details.reasoning_tokens)
-      : 0
+    // 思考 token：WorkBuddy 用 completion_thinking_tokens，OpenAI 形状是嵌套的 reasoning_tokens
+    const reasoning =
+      positive(usage, ['completion_thinking_tokens']) ||
+      (isRecord(usage.completion_tokens_details)
+        ? num(usage.completion_tokens_details.reasoning_tokens)
+        : 0)
 
     if (input + output + cached + cacheWrite === 0) return
 
@@ -233,6 +232,15 @@ function emptyUsage(): {
     cacheWriteTokens: 0,
     reasoningTokens: 0
   }
+}
+
+/** 按顺序取第一个 > 0 的数值；全为 0/缺失时返回 0 */
+function positive(object: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    const value = num(object[key])
+    if (value > 0) return value
+  }
+  return 0
 }
 
 function num(value: unknown): number {
