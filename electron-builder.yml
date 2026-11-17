@@ -8,6 +8,8 @@ directories:
 
 files:
   - out/**/*
+  # 自检/探针代码只在开发时按需动态加载，不打进安装包
+  - '!out/main/chunks/smoke-*.js'
   - resources/**/*
   - package.json
   # MIT 要求在分发的副本中保留版权与许可声明
