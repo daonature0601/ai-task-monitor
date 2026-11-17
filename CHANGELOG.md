@@ -15,6 +15,15 @@
   链式接管原命令）注入钩子脚本，写入前备份、可还原
 - **自定义时间区间**：统计页与任务页的时间筛选新增「自定义」，支持起止日期
 - 适配器页「数据维护 → 重建历史索引」：可按 7/30/90 天清空派生数据并重扫日志
+- **任务名改为工具内的会话展示名**：Codex 读 `session_index.jsonl` 的 `thread_name`，
+  Claude Code 读 `summary` 行，WorkBuddy 读 `ai-title`，DeepSeek 读 `session/title`；
+  新增 `project` 字段（迁移 v5）单独记录所属项目
+- **CodeBuddy IDE 用量采集**：读取 `CodeBuddyExtension/Data/**/history/<ws>/<convId>/index.json`
+  的 `requests[].usage`（IDE 不写 JSONL），标题取工作区索引、项目取 `genie-history` 解码路径
+- **DeepSeek Harness 用量采集**：改读 `~/.dsh/sessions` 的 zstd 会话文件，新增 `fzstd` 依赖；
+  支持 `turn/start`、`turn/end`、`session/title`、`request/header` 与 `assistant/message.usage`
+- **WorkBuddy 请求级用量**：改读 `~/.workbuddy/projects/**/*.jsonl` 的 `providerData.rawUsage`，
+  子代理日志按路径归属父会话
 
 ### 变更
 
@@ -25,6 +34,11 @@
   - 无轮次事件的工具以「当前活跃段的起点」近似
 - 任务页状态筛选精简为 全部 / 进行中 / 已结束，运行中与静默的区别由行内状态标签承担
 - 图表 Tooltip 改为自绘：实色底色、三档文字对比度，柱状图悬停底色改为 4.5% 白
+- **WorkBuddy token 口径由 `partial` 升为 `native`**：不再使用 `session_usage.used`（上下文占用量），
+  改用请求级真实 usage，可按价目表计价
+- **TaskMachine 新增 `keepSession`**：IDE 类数据源（一次对话一个任务）不按 10 分钟空档切分
+- 任务表改为 `table-fixed` 布局，长标题单行省略，不再挤掉副标题
+- 任务副标题统一为「项目 · 模型」，缺失时分别显示「项目未知 / 模型未知」
 
 ### 修复
 
@@ -33,6 +47,14 @@
 - 概览指标与任务页「运行中」口径不一致
 - 今日费用远大于近 30 天：统计改为按用量事件时间归集
 - 子代理被拆成独立任务、guardian 线程误建任务
+- **心跳信号凭空建任务**：`<pid>.json` 只是进程存活信号（WorkBuddy 的 prewarm 池会一次生成多个），
+  曾导致实时任务出现多张同名空卡片；现在心跳只维持已有任务的状态
+- **CodeBuddy IDE 用量少算 29%**：`index.json` 中约 423 条请求没有 `startedAt`，此前被整条丢弃；
+  现按顺序沿用上一条请求时间，整份缺失时退到文件 mtime（事件 1011 → 1421，输入 +45%）
+- **CodeBuddy 切号副本重复计入**：按「时间戳 + 四类用量」的请求指纹跨文件去重
+- **零时长空回合**：只有回合开始信号、没有推进的已结束任务在列表中隐藏（Codex 673 → 554）
+- **缓存字段被 0 值掩盖**：`cache_read_input_tokens` 常为 0，改用「取正值」的优先级链；
+  同时补上 `completion_thinking_tokens` 的思考 token
 
 ## [1.0.0] - 2026-11-17
 

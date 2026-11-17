@@ -61,10 +61,10 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 | --- | --- | --- | --- |
 | Codex | `~/.codex/sessions/{Y}/{M}/{D}/rollout-*.jsonl` | JSONL 增量 tail，读 `token_count.info.last_token_usage` | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
 | Claude Code | `~/.claude/projects/<slug>/<uuid>.jsonl` | JSONL 增量 tail，逐行累加 `message.usage` | 完整：输入 / 输出 / `cache_read` / `cache_creation` |
-| WorkBuddy | `~/.workbuddy/workbuddy.db` → `sessions` + `session_usage`；`~/.workbuddy/sessions/<pid>.json` | 只读 SQLite 轮询 + 会话心跳 | 部分：上下文占用量，**不计价** |
-| CodeBuddy | `~/.codebuddy/projects/*.jsonl`；`~/.codebuddy/sessions/<pid>.json` | 文件监听 + 会话心跳（按「项目 + 日期」归并） | 心跳无 token → `unavailable`；jsonl 命中时用原生用量 |
+| WorkBuddy | `~/.workbuddy/projects/**/*.jsonl`（`providerData.rawUsage`） | JSONL 增量 tail；子代理 `subagents/agent-*.jsonl` 按路径归属父会话 | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
+| CodeBuddy | IDE：`CodeBuddyExtension/Data/**/history/<ws>/<convId>/index.json`；CLI：`~/.codebuddy/projects/*.jsonl` | 索引轮询（mtime + 最大时间戳游标）与 JSONL tail 并行；状态走 `edit-sessions` | IDE 为请求级真实用量（**不含模型名，费用 `—`**）；CLI 原生 |
 | Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | 只读 SQLite（`ItemTable`） | 多数情况下不可得（服务端持有） |
-| DeepSeek Harness | `~/Library/Application Support/@deepseek-ai/dsh-desktop/Local Storage/leveldb` | LevelDB 快照只读 + 桥接 | 桥接可用；本地解析仅在命中 usage 字段时记录 |
+| DeepSeek Harness | `~/.dsh/sessions/<项目>/<会话>/session.v4.jsonl.zstd` | zstd 多帧解压（`fzstd`）+ 按 `seq` 增量去重 | 完整：输入 / 输出 / 缓存读 / 缓存写 |
 | 元宝 | 无本地会话落盘（实测仅 `.qimei/`、`Documents/`） | 本地 HTTP 桥接 + 用户脚本 | 桥接可用；否则仅记录会话时长 |
 
 ### 数据可信度约定
@@ -75,6 +75,8 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 - `bridge` —— 网页脚本上报，可计价
 - `partial` —— 只能取到部分字段（如 WorkBuddy 的上下文占用量），**费用显示 `—`**
 - `unavailable` —— 无用量来源，仅记录会话时长，费用与命中率显示 `—`
+
+> CodeBuddy IDE 的索引不含模型名，token 为 `native` 但无法计价，费用显示 `—`；任务副标题统一显示「项目未知 / 模型未知」。
 
 ---
 
@@ -258,13 +260,13 @@ adapters（7 个采集器）
 ## 8. 已知限制
 
 1. **元宝** 本地无任何会话/用量落盘，不装脚本时只能记录「进程存活 + 会话时长」，token 全为 `—`。
-2. **DeepSeek Harness** 的 Local Storage 无稳定 schema，只有解析出 usage 字段时才记 token。
+2. **DeepSeek Harness** 的 Local Storage 只有界面状态（draft / 侧边栏），会话与用量在 `~/.dsh/sessions` 的 zstd 文件里；旧版本误读 LevelDB 期间的历史无法回补。
 3. **Cursor** 的 token 用量由服务端持有，本地通常只有会话时间线，费用显示 `—`。
-4. **WorkBuddy** 的 `session_usage.used` 是上下文占用量而非计费输入，故按 `partial` 处理且不计价。
+4. **CodeBuddy IDE 无模型名**：`index.json` 只有用量没有模型（`state.vscdb` 里是加密值），因此 token 准确但费用恒为 `—`。
 5. **回填窗口固定 7 天**（按文件 mtime 过滤）：更早的事件不会自动导入；清空 `file_cursors` 重扫也不会超过该窗口。若需要更早的历史，只能调大适配器里的 `backfillDays` 后重扫。
 6. **未知/待确认模型不计价**：费用列显示 `—`，需在设置页补录单价并标记「已核实」后才会计算。
 7. **Codex 无 API token 单价**：任务时长与 token 完整，但费用为 `—`，除非手动补录订阅折算价。
-8. **心跳通道只有时长**：CodeBuddy / WorkBuddy 的 `<pid>.json` 心跳不含 token，这类任务固定标 `unavailable`。
+8. **心跳不再建任务**：`<pid>.json` 是进程存活信号（WorkBuddy 的 prewarm 池会一次生成多个），现在只维持已有任务的状态，不再产生空卡片。
 9. **CodeBuddy 纯聊天任务无法判定运行中**：桌面端没有 hook，会话级信号只有 `edit-sessions/<conversationId>.json` 的 `updatedAt`，它仅在产生文件编辑时刷新；只问答不改文件的任务拿不到运行态。
 10. **Codex 没有「开始」事件**：官方 `notify` 只提供回合结束（且常被其它工具占用）。因此开始依赖 `io`（文件写入），结束可精确到 hook。
 11. **Cursor 只有进程级状态**：无 hook、无心跳，只能判断应用是否打开，无法区分「开着但在看代码」与「正在跑任务」。
@@ -278,7 +280,8 @@ src/shared     types / ipc-contract / format / defaults（前后端共用）
 src/main       index / window / tray / runtime / ipc
   ├ core       task-machine / pricing / alerts / scheduler / snapshot / batch-writer
   ├ adapters   7 个工具适配器 + base + registry
-  ├ collectors jsonl-tailer / state-inbox / sqlite-reader / leveldb-reader / process-probe / paths
+  ├ collectors jsonl-tailer / state-inbox / codebuddy-ide / dsh-session-reader /
+  │             sqlite-reader / leveldb-reader / process-probe / paths
   ├ hooks      注入工具的钩子脚本模板 + 安装/还原
   ├ bridge     server + 用户脚本模板
   ├ dev        smoke（自检与探针，动态加载，不进生产包）
