@@ -152,6 +152,8 @@ export function TaskDetailDrawer(): JSX.Element | null {
                 <Metric label="输出 Token" value={formatTokensFull(task.outputTokens)} mono />
                 <Metric label="输入缓存命中" value={formatRate(task.cacheHitRate)} mono />
                 <Metric label="输出缓存命中" value="—" mono hint="工具未上报该指标" />
+                <Metric label="模型" value={task.model ?? '—'} hint="数据源未提供模型时不计价" />
+                <Metric label="事件数" value={String(task.eventCount)} mono />
                 <Metric
                   label="当前费用"
                   value={formatTaskCost(task.costUsd, task.costKnown, currency, fxRate)}
@@ -169,7 +171,6 @@ export function TaskDetailDrawer(): JSX.Element | null {
                           : '模型单价待确认'
                   }
                 />
-                <Metric label="事件数" value={String(task.eventCount)} mono />
               </div>
 
               <section>

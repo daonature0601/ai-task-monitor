@@ -8,7 +8,6 @@ import {
   formatTimeShort,
   formatTokens,
   formatTokensFull,
-  taskSubtitle,
   STATUS_HINT,
   STATUS_LABEL
 } from '@shared/format'
@@ -77,8 +76,13 @@ export function TaskTable({
                     <StatusDot tone={statusTone(task.status)} pulse={live && task.status === 'running'} />
                     <div className="min-w-0">
                       <p className="truncate text-fg-hi">{task.title}</p>
-                      <p className="truncate text-caption text-fg-lo">
-                        {taskSubtitle(task)}
+                      {/* 项目名可省略，模型名优先展示全（最多占行宽 3/4） */}
+                      <p className="flex min-w-0 items-baseline text-caption text-fg-lo">
+                        <span className="min-w-0 truncate">{task.project ?? '项目未知'}</span>
+                        <span className="mx-1 shrink-0">·</span>
+                        <span className="max-w-[75%] shrink-0 truncate">
+                          {task.model ?? '模型未知'}
+                        </span>
                       </p>
                     </div>
                   </div>

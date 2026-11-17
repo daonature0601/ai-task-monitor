@@ -70,10 +70,11 @@ export function LiveTaskCard({
                 </span>
               </span>
             </div>
-            <p className="mt-0.5 truncate text-caption text-fg-lo">
-              {task.project ? <span className="text-fg-mid">{task.project}</span> : '项目未知'}
-              <span className="mx-1.5 text-fg-lo/50">·</span>
-              {task.model ?? '模型未知'}
+            {/* 与任务列表一致：项目可省略，模型最多占 3/4 行宽 */}
+            <p className="mt-0.5 flex min-w-0 items-baseline text-caption text-fg-lo">
+              <span className="min-w-0 truncate text-fg-mid">{task.project ?? '项目未知'}</span>
+              <span className="mx-1 shrink-0 text-fg-lo/50">·</span>
+              <span className="max-w-[75%] shrink-0 truncate">{task.model ?? '模型未知'}</span>
             </p>
           </div>
         </div>
