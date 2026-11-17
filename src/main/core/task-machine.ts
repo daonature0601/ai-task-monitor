@@ -112,6 +112,21 @@ export class TaskMachine {
     if (this.seen.has(dedupe)) return { applied: false, taskId }
 
     const now = Date.now()
+
+    // 只有元信息 / 标题的信号（skipEventLog 且无 token、无轮次边界）不足以
+    // 证明「发生过一次对话」。兜底轮询重读旧文件时会重新推送这类事件，
+    // 若无条件建任务，实时任务里就会冒出一张 0 事件、显示运行中的幽灵卡片。
+    const usageTotal =
+      positive(delta.inputTokens) +
+      positive(delta.outputTokens) +
+      positive(delta.cacheReadTokens) +
+      positive(delta.cacheWriteTokens)
+    const signalOnly =
+      Boolean(delta.skipEventLog) && usageTotal === 0 && !delta.turnStart && !delta.turnEnd
+    if (!task && signalOnly) {
+      return { applied: false, taskId }
+    }
+
     if (!task) {
       task = {
         id: taskId,
