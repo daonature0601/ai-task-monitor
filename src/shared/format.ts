@@ -72,14 +72,19 @@ export function turnElapsed(
     turnEndedAt?: number
     status: string
     endedAt?: number
+    lastEventAt?: number
     durationMs: number
   },
   now = Date.now()
 ): number {
   const start = task.turnStartedAt
   if (!start) return task.durationMs
+  // 只有「运行中」才用当前时间推进；静默 / 已结束都冻结在最后一次活动时刻，
+  // 否则卡片（低频刷新）与详情（每秒刷新）会各算各的，出现两个不同的数字。
   const end =
-    task.turnEndedAt ?? (task.status === 'ended' ? (task.endedAt ?? start) : now)
+    task.status === 'running'
+      ? now
+      : (task.turnEndedAt ?? task.endedAt ?? task.lastEventAt ?? start)
   return Math.max(0, end - start)
 }
 

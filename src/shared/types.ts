@@ -275,7 +275,14 @@ export interface TopTaskRow {
   tool: ToolId
   costUsd: number
   totalTokens: number
+  /** 会话总时长（用于区间聚合） */
   durationMs: number
+  /** 当次问答的开始时间与结束时间 */
+  turnStartedAt: number
+  turnEndedAt?: number
+  status: TaskStatus
+  lastEventAt: number
+  endedAt?: number
 }
 
 export interface StatsPayload {

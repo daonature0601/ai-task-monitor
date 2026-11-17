@@ -1,9 +1,10 @@
 import type { Currency, TaskSnapshot } from '@shared/types'
 import {
   formatDuration,
-  turnElapsed,
   formatRate,
   formatTaskCost,
+  formatTimeFull,
+  turnElapsed,
   formatTimeShort,
   formatTokens,
   formatTokensFull,
@@ -16,8 +17,8 @@ import { StatusDot, ToolAvatar } from '../ui/atoms'
 const COLUMNS = [
   { key: 'task', label: '任务', className: 'min-w-[220px]' },
   { key: 'tool', label: '工具', className: 'w-[128px]' },
-  { key: 'start', label: '开始时间', className: 'w-[112px]' },
-  { key: 'duration', label: '时长', className: 'w-[92px]' },
+  { key: 'start', label: '本轮开始', className: 'w-[112px]' },
+  { key: 'duration', label: '本轮耗时', className: 'w-[96px]' },
   { key: 'input', label: '输入', className: 'w-[76px] text-right' },
   { key: 'output', label: '输出', className: 'w-[76px] text-right' },
   { key: 'cache', label: '缓存命中', className: 'w-[96px] text-right' },
@@ -87,8 +88,11 @@ export function TaskTable({
                     <span className="truncate text-caption text-fg-mid">{toolName(task.tool)}</span>
                   </div>
                 </td>
-                <td className="num px-3 py-2.5 text-caption text-fg-mid">
-                  {formatTimeShort(task.startedAt)}
+                <td
+                  className="num px-3 py-2.5 text-caption text-fg-mid"
+                  title={`会话开始 ${formatTimeFull(task.startedAt)}`}
+                >
+                  {formatTimeShort(task.turnStartedAt ?? task.startedAt)}
                 </td>
                 <td className="num px-3 py-2.5 text-caption text-fg-mid">
                   {formatDuration(elapsed)}

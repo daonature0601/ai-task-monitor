@@ -3,7 +3,7 @@ import { app, dialog, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc-contract'
 import { PRICING_SEED } from '@shared/defaults'
 import type { AppSettings, PricingRow, ToolId } from '@shared/types'
-import { computeCacheHitRate, formatTimeFull } from '@shared/format'
+import { computeCacheHitRate, formatTimeFull, turnElapsed } from '@shared/format'
 import { buildUserscript, scriptFileName } from '../bridge/userscripts'
 import type { Runtime } from '../runtime'
 import { getMainWindow, showMainWindow } from '../window'
@@ -51,8 +51,10 @@ export function registerIpcHandlers(runtime: Runtime): void {
     const header = [
       '任务',
       '工具',
-      '开始时间',
-      '时长(秒)',
+      '本轮开始',
+      '本轮耗时(秒)',
+      '会话开始',
+      '会话时长(秒)',
       '输入Token',
       '输出Token',
       '缓存读Token',
@@ -67,6 +69,8 @@ export function registerIpcHandlers(runtime: Runtime): void {
       [
         task.title,
         task.tool,
+        formatTimeFull(task.turnStartedAt ?? task.startedAt),
+        Math.round(turnElapsed(task) / 1000),
         formatTimeFull(task.startedAt),
         Math.round(task.durationMs / 1000),
         task.inputTokens,

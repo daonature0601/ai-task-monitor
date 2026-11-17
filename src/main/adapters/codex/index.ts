@@ -201,6 +201,9 @@ export class CodexAdapter extends BaseAdapter {
           skipEventLog: true,
           turnStart: kind === 'task_started',
           turnEnd: kind === 'task_complete',
+          // 回合结束即任务结束：Codex 桌面端显示"对话执行完成"时，
+          // 这一轮就是终点，不应再挂 30 分钟「静默」
+          endSignal: kind === 'task_complete',
           dedupeKey: `turn:${kind}:${ts}`,
           ...emptyUsage()
         })

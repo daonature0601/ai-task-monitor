@@ -4,6 +4,7 @@ import type {
   DailyPoint,
   MonitorSummary,
   StatsPayload,
+  TaskStatus,
   ToolAggregate,
   ToolId,
   TopTaskRow
@@ -165,7 +166,12 @@ export function topTasks(
               SUM(e.input_tokens + e.output_tokens + e.cache_read_tokens + e.cache_write_tokens) AS total_tokens,
               t.title AS title,
               t.tool AS tool,
-              t.duration_ms AS duration_ms
+              t.duration_ms AS duration_ms,
+              t.status AS status,
+              t.last_event_at AS last_event_at,
+              t.ended_at AS ended_at,
+              t.turn_started_at AS turn_started_at,
+              t.turn_ended_at AS turn_ended_at
        FROM usage_events e
        JOIN tasks t ON t.id = e.task_id
        WHERE e.ts >= ? AND e.ts <= ?
@@ -180,6 +186,11 @@ export function topTasks(
     title: string | null
     tool: string
     duration_ms: number
+    status: string
+    last_event_at: number
+    ended_at: number | null
+    turn_started_at: number | null
+    turn_ended_at: number | null
   }>
 
   return rows.map((row) => ({
@@ -188,7 +199,12 @@ export function topTasks(
     tool: row.tool as ToolId,
     costUsd: row.cost_usd,
     totalTokens: row.total_tokens,
-    durationMs: row.duration_ms
+    durationMs: row.duration_ms,
+    status: row.status as TaskStatus,
+    lastEventAt: row.last_event_at,
+    endedAt: row.ended_at ?? undefined,
+    turnStartedAt: row.turn_started_at ?? 0,
+    turnEndedAt: row.turn_ended_at ?? undefined
   }))
 }
 
@@ -222,14 +238,21 @@ export function durationBuckets(db: Database.Database, from: number, to: number)
   // 时长是任务属性，按任务开始时间归日
   const row = db
     .prepare(
+      // 时长口径与界面一致：以「本轮」实际跨度统计，
+      // 运行中的任务冻结在最后一次活动时刻，避免把仍在跑的一轮算成超长分布。
       `SELECT
-        SUM(CASE WHEN duration_ms < 60000 THEN 1 ELSE 0 END) AS b0,
-        SUM(CASE WHEN duration_ms >= 60000 AND duration_ms < 300000 THEN 1 ELSE 0 END) AS b1,
-        SUM(CASE WHEN duration_ms >= 300000 AND duration_ms < 900000 THEN 1 ELSE 0 END) AS b2,
-        SUM(CASE WHEN duration_ms >= 900000 AND duration_ms < 1800000 THEN 1 ELSE 0 END) AS b3,
-        SUM(CASE WHEN duration_ms >= 1800000 AND duration_ms < 3600000 THEN 1 ELSE 0 END) AS b4,
-        SUM(CASE WHEN duration_ms >= 3600000 THEN 1 ELSE 0 END) AS b5
-       FROM tasks WHERE started_at >= ? AND started_at <= ?`
+        SUM(CASE WHEN turn_ms < 60000 THEN 1 ELSE 0 END) AS b0,
+        SUM(CASE WHEN turn_ms >= 60000 AND turn_ms < 300000 THEN 1 ELSE 0 END) AS b1,
+        SUM(CASE WHEN turn_ms >= 300000 AND turn_ms < 900000 THEN 1 ELSE 0 END) AS b2,
+        SUM(CASE WHEN turn_ms >= 900000 AND turn_ms < 1800000 THEN 1 ELSE 0 END) AS b3,
+        SUM(CASE WHEN turn_ms >= 1800000 AND turn_ms < 3600000 THEN 1 ELSE 0 END) AS b4,
+        SUM(CASE WHEN turn_ms >= 3600000 THEN 1 ELSE 0 END) AS b5
+       FROM (
+         SELECT MAX(0, COALESCE(turn_ended_at, ended_at, last_event_at, turn_started_at, started_at)
+                       - COALESCE(turn_started_at, started_at)) AS turn_ms
+         FROM tasks
+         WHERE started_at >= ? AND started_at <= ?
+       )`
     )
     .get(from, to) as Record<string, number | null>
 

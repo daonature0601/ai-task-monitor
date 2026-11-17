@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Download } from 'lucide-react'
 import type { StatsPayload } from '@shared/types'
-import { formatCost, formatDuration, formatRate, formatTokens } from '@shared/format'
+import { formatCost, formatDuration, formatRate, formatTokens, turnElapsed } from '@shared/format'
 import { useMonitor } from '../store/monitor'
 import { Card, Metric, SectionTitle, ToolAvatar } from '../components/ui/atoms'
 import { CacheEfficiency, ChartTooltip, CostTrend, useChartReady } from '../components/charts'
@@ -212,7 +212,7 @@ export function Analytics(): JSX.Element {
                         />
                       </div>
                       <span className="num shrink-0 text-[10px] text-fg-lo">
-                        {formatTokens(task.totalTokens)} · {formatDuration(task.durationMs)}
+                        {formatTokens(task.totalTokens)} · 本轮 {formatDuration(turnElapsed(task))}
                       </span>
                     </div>
                   </div>

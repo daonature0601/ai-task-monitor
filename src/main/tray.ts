@@ -1,6 +1,6 @@
 import { Menu, Tray, app } from 'electron'
 import type { SnapshotPayload } from '@shared/types'
-import { formatCost, formatDurationShort, formatTokens } from '@shared/format'
+import { formatCost, formatDurationShort, formatTokens, turnElapsed } from '@shared/format'
 import { createTrayIcon } from './assets/tray-icon'
 
 export interface TrayDeps {
@@ -91,7 +91,8 @@ export class TrayController {
     } else {
       for (const task of live) {
         items.push({
-          label: `${task.title} · ${formatDurationShort(task.durationMs)} · ${formatCost(task.costUsd, currency, fxRate)}`,
+          // 与界面一致：显示当次问答的耗时，而不是整段会话
+          label: `${task.title} · ${formatDurationShort(turnElapsed(task))} · ${formatCost(task.costUsd, currency, fxRate)}`,
           click: () => this.deps.onShow()
         })
       }

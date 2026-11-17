@@ -7,7 +7,8 @@ import {
   formatRate,
   formatTaskCost,
   formatTokens,
-  startOfDay
+  startOfDay,
+  turnElapsed
 } from '@shared/format'
 
 describe('formatDuration', () => {
@@ -84,5 +85,19 @@ describe('startOfDay', () => {
     expect(start.getHours()).toBe(0)
     expect(start.getMinutes()).toBe(0)
     expect(start.getDate()).toBe(16)
+  })
+
+  it('非运行态的本轮耗时冻结在最后活动时刻', () => {
+    const task = {
+      turnStartedAt: 1_000,
+      status: 'idle',
+      lastEventAt: 61_000,
+      durationMs: 999_999
+    }
+    // 无论传入多晚的 now，静默任务都停在 lastEventAt
+    expect(turnElapsed(task, 10_000_000)).toBe(60_000)
+
+    const running = { turnStartedAt: 1_000, status: 'running', durationMs: 0 }
+    expect(turnElapsed(running, 61_000)).toBe(60_000)
   })
 })

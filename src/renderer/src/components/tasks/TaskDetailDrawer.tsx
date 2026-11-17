@@ -262,6 +262,9 @@ export function TaskDetailDrawer(): JSX.Element | null {
     sessionId: task.externalSessionId,
     model: task.model,
     workspace: task.workspace,
+    turnStartedAt: formatTimeFull(task.turnStartedAt ?? task.startedAt),
+    turnEndedAt: task.turnEndedAt ? formatTimeFull(task.turnEndedAt) : null,
+    turnElapsedSec: Math.round(elapsed / 1000),
     startedAt: formatTimeFull(task.startedAt),
     lastEventAt: formatTimeFull(task.lastEventAt),
     tokens: {
