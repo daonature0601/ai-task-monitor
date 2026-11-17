@@ -73,5 +73,16 @@ export function recomputeEventCosts(
   })
 
   run()
+
+  // 事件价变了，任务上的 cost_usd 是事件求和的结果，必须一起刷新；
+  // 否则改了价目表后事件已重算、界面仍显示旧金额（0 或旧值）。
+  db.prepare(
+    `UPDATE tasks
+        SET cost_usd = COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+            cost_known = CASE
+              WHEN COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0) > 0
+              THEN 1 ELSE cost_known END`
+  ).run()
+
   return { updated, total: rows.length }
 }

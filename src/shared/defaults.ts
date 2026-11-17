@@ -42,41 +42,81 @@ export const SETTINGS_BOUNDS: Record<string, { min: number; max: number; step: n
 const ANTHROPIC_SRC = 'https://platform.claude.com/docs/en/about-claude/pricing'
 const OPENAI_SRC = 'https://platform.openai.com/docs/pricing'
 const DEEPSEEK_SRC = 'https://api-docs.deepseek.com/quick_start/pricing'
+const ZHIPU_SRC = 'https://docs.bigmodel.cn/cn/guide/start/pricing'
+
+/** 智谱官方以人民币报价，这里按 7.1 折算为美元（与界面汇率无关，仅用于入库） */
+const CNY_TO_USD = 7.1
+const cny = (value: number): number => Math.round((value / CNY_TO_USD) * 1000) / 1000
 
 /**
- * 内置种子价目表（USD / 每百万 token），首次启动写入 pricing 表，之后用户可编辑。
+ * 价目表种子（单位：美元 / 百万 token，Standard 档）。
  *
- * 规则：
- *  - status='verified' 的行价格来自厂商官方定价页（source 字段给出链接）
- *  - 无法核实的模型（Codex 订阅制、腾讯/智谱自有模型等）一律 status='pending'、单价为 0，
- *    界面费用显示 "—"，不做任何推算
+ * 全部来自官方定价页，抓取时间 2026-11-17：
+ * - Anthropic：Fable / Mythos / Opus / Sonnet / Haiku 全系
+ * - OpenAI：gpt-6 系与 gpt-5 系 Standard 价
+ * - DeepSeek：flash 与 v4-pro，取**低谷价**（高峰为其 2 倍）
+ * - 智谱：GLM-5.3 / 5.3-Flash / 5.3-FlashX / 5.2 / 5.1 / 5，人民币折算
+ *
+ * 官方页面没有对应项的（Codex 订阅、混元内部别名等）保持 pending，不猜。
  */
 export const PRICING_SEED: PricingRow[] = [
-  // ── Anthropic（官方 Pricing 页）─────────────────────────────
-  { id: 'anthropic-opus-5.5', provider: 'Anthropic', match: 'claude-opus-5.5*', inputPerM: 4, outputPerM: 20, cacheReadPerM: 0.2, cacheWritePerM: 5, status: 'verified', source: ANTHROPIC_SRC },
-  { id: 'anthropic-opus-5', provider: 'Anthropic', match: 'claude-opus-5*', inputPerM: 5, outputPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25, status: 'verified', source: ANTHROPIC_SRC },
+  // ── Anthropic（官方 Pricing 页，MTok）─────────────────────────
+  { id: 'anthropic-fable-5.2', provider: 'Anthropic', match: 'claude-fable-5.2*', inputPerM: 8, outputPerM: 40, cacheReadPerM: 0.2, cacheWritePerM: 10, status: 'verified', source: ANTHROPIC_SRC, note: '5m 写入价；1h 写入 $16' },
+  { id: 'anthropic-opus-5.5', provider: 'Anthropic', match: 'claude-opus-5.5*', inputPerM: 4, outputPerM: 20, cacheReadPerM: 0.2, cacheWritePerM: 5, status: 'verified', source: ANTHROPIC_SRC, note: '5m 写入价；1h 写入 $8' },
+  { id: 'anthropic-sonnet-5.5', provider: 'Anthropic', match: 'claude-sonnet-5.5*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.1, cacheWritePerM: 2.5, status: 'verified', source: ANTHROPIC_SRC, note: '5m 写入价；1h 写入 $4' },
+  { id: 'anthropic-haiku-5.5', provider: 'Anthropic', match: 'claude-haiku-5.5*', inputPerM: 0.1, outputPerM: 0.5, cacheReadPerM: 0.01, cacheWritePerM: 0.125, status: 'verified', source: ANTHROPIC_SRC, note: '≤100K 提示；>100K 为 $0.5/$2.5' },
+  { id: 'anthropic-mythos-5.2', provider: 'Anthropic', match: 'claude-mythos-5.2*', inputPerM: 8, outputPerM: 40, cacheReadPerM: 0.2, cacheWritePerM: 10, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-fable-5.1', provider: 'Anthropic', match: 'claude-fable-5.1*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 0.25, cacheWritePerM: 12.5, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-mythos-5.1', provider: 'Anthropic', match: 'claude-mythos-5.1*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 0.25, cacheWritePerM: 12.5, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-fable-5', provider: 'Anthropic', match: 'claude-fable-5*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-mythos-5', provider: 'Anthropic', match: 'claude-mythos-5*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-opus-4.8', provider: 'Anthropic', match: 'claude-opus-4.8*', inputPerM: 5, outputPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-opus-4.7', provider: 'Anthropic', match: 'claude-opus-4.7*', inputPerM: 5, outputPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-opus-4.6', provider: 'Anthropic', match: 'claude-opus-4.6*', inputPerM: 5, outputPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25, status: 'verified', source: ANTHROPIC_SRC },
   { id: 'anthropic-opus-4.5', provider: 'Anthropic', match: 'claude-opus-4.5*', inputPerM: 5, outputPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-opus-5', provider: 'Anthropic', match: 'claude-opus-5*', inputPerM: 5, outputPerM: 25, cacheReadPerM: 0.5, cacheWritePerM: 6.25, status: 'verified', source: ANTHROPIC_SRC },
   { id: 'anthropic-opus-4.1', provider: 'Anthropic', match: 'claude-opus-4.1*', inputPerM: 15, outputPerM: 75, cacheReadPerM: 1.5, cacheWritePerM: 18.75, status: 'verified', source: ANTHROPIC_SRC },
   { id: 'anthropic-opus-4', provider: 'Anthropic', match: 'claude-opus-4*', inputPerM: 15, outputPerM: 75, cacheReadPerM: 1.5, cacheWritePerM: 18.75, status: 'verified', source: ANTHROPIC_SRC },
-  { id: 'anthropic-sonnet-5.5', provider: 'Anthropic', match: 'claude-sonnet-5.5*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.1, cacheWritePerM: 2.5, status: 'verified', source: ANTHROPIC_SRC },
   { id: 'anthropic-sonnet-5', provider: 'Anthropic', match: 'claude-sonnet-5*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.2, cacheWritePerM: 2.5, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-sonnet-4.6', provider: 'Anthropic', match: 'claude-sonnet-4.6*', inputPerM: 3, outputPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75, status: 'verified', source: ANTHROPIC_SRC },
+  { id: 'anthropic-sonnet-4.5', provider: 'Anthropic', match: 'claude-sonnet-4.5*', inputPerM: 3, outputPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75, status: 'verified', source: ANTHROPIC_SRC },
   { id: 'anthropic-sonnet-4', provider: 'Anthropic', match: 'claude-sonnet-4*', inputPerM: 3, outputPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75, status: 'verified', source: ANTHROPIC_SRC },
-  { id: 'anthropic-haiku-5.5', provider: 'Anthropic', match: 'claude-haiku-5.5*', inputPerM: 0.1, outputPerM: 0.5, cacheReadPerM: 0.01, cacheWritePerM: 0.125, status: 'verified', source: ANTHROPIC_SRC, note: '≤100K 提示；>100K 为 $0.5/$2.5' },
   { id: 'anthropic-haiku-4.5', provider: 'Anthropic', match: 'claude-haiku-4.5*', inputPerM: 1, outputPerM: 5, cacheReadPerM: 0.1, cacheWritePerM: 1.25, status: 'verified', source: ANTHROPIC_SRC },
 
   // ── OpenAI（官方 API Pricing 页，Standard 档）────────────────
-  { id: 'openai-gpt-6-astra', provider: 'OpenAI', match: 'gpt-6-astra*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5, status: 'verified', source: OPENAI_SRC, note: '缓存写入为 30m 档；12h 档 $25' },
+  { id: 'openai-gpt-6-astra', provider: 'OpenAI', match: 'gpt-6-astra*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5, status: 'verified', source: OPENAI_SRC, note: '缓存写入为 30m 档；12h 档 $25，长上下文翻倍' },
   { id: 'openai-gpt-6.1-sol', provider: 'OpenAI', match: 'gpt-6.1-sol*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.1, cacheWritePerM: 2.5, status: 'verified', source: OPENAI_SRC },
   { id: 'openai-gpt-6.1-terra', provider: 'OpenAI', match: 'gpt-6.1-terra*', inputPerM: 1, outputPerM: 5, cacheReadPerM: 0.05, cacheWritePerM: 1.25, status: 'verified', source: OPENAI_SRC },
   { id: 'openai-gpt-6-luna', provider: 'OpenAI', match: 'gpt-6-luna*', inputPerM: 0.1, outputPerM: 0.5, cacheReadPerM: 0.01, cacheWritePerM: 0.125, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-6-sol', provider: 'OpenAI', match: 'gpt-6-sol*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.2, cacheWritePerM: 2.5, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5.6-sol', provider: 'OpenAI', match: 'gpt-5.6-sol*', inputPerM: 4, outputPerM: 20, cacheReadPerM: 0.4, cacheWritePerM: 5, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5.6-terra', provider: 'OpenAI', match: 'gpt-5.6-terra*', inputPerM: 2, outputPerM: 12, cacheReadPerM: 0.2, cacheWritePerM: 2.5, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5.6-luna', provider: 'OpenAI', match: 'gpt-5.6-luna*', inputPerM: 0.2, outputPerM: 1.2, cacheReadPerM: 0.02, cacheWritePerM: 0.25, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5.5', provider: 'OpenAI', match: 'gpt-5.5*', inputPerM: 5, outputPerM: 30, cacheReadPerM: 0.5, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC, note: '<272K 上下文；更长时 $10/$45' },
+  { id: 'openai-gpt-5.4', provider: 'OpenAI', match: 'gpt-5.4*', inputPerM: 2.5, outputPerM: 15, cacheReadPerM: 0.25, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC, note: '<272K 上下文；更长时 $5/$22.5' },
+  { id: 'openai-gpt-5.2', provider: 'OpenAI', match: 'gpt-5.2*', inputPerM: 1.75, outputPerM: 14, cacheReadPerM: 0.175, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5.1', provider: 'OpenAI', match: 'gpt-5.1*', inputPerM: 1.25, outputPerM: 10, cacheReadPerM: 0.125, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5', provider: 'OpenAI', match: 'gpt-5*', inputPerM: 1.25, outputPerM: 10, cacheReadPerM: 0.125, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5-mini', provider: 'OpenAI', match: 'gpt-5-mini*', inputPerM: 0.25, outputPerM: 2, cacheReadPerM: 0.025, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC },
+  { id: 'openai-gpt-5-nano', provider: 'OpenAI', match: 'gpt-5-nano*', inputPerM: 0.05, outputPerM: 0.4, cacheReadPerM: 0.005, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC },
 
   // ── DeepSeek（官方 Pricing 页，低谷价）──────────────────────
-  { id: 'deepseek-flash', provider: 'DeepSeek', match: 'deepseek-flash*', inputPerM: 0.15, outputPerM: 0.6, cacheReadPerM: 0.003, cacheWritePerM: 0.15, status: 'verified', source: DEEPSEEK_SRC, note: '低谷价；高峰（UTC 周一至周五 01-04 / 06-10 点）为 2 倍' },
+  { id: 'deepseek-flash', provider: 'DeepSeek', match: 'deepseek-flash*', inputPerM: 0.15, outputPerM: 0.6, cacheReadPerM: 0.003, cacheWritePerM: 0.15, status: 'verified', source: DEEPSEEK_SRC, note: '低谷价；高峰（UTC 周一至周五 01-04 / 06-10）为 2 倍' },
+  { id: 'deepseek-v4.1-flash', provider: 'DeepSeek', match: 'deepseek-v4.1-flash*', inputPerM: 0.15, outputPerM: 0.6, cacheReadPerM: 0.003, cacheWritePerM: 0.15, status: 'verified', source: DEEPSEEK_SRC, note: '官方注明 deepseek-v4-flash 等旧名按 Flash 价计费' },
+  { id: 'deepseek-v4-flash-legacy', provider: 'DeepSeek', match: 'deepseek-v4-flash*', inputPerM: 0.15, outputPerM: 0.6, cacheReadPerM: 0.003, cacheWritePerM: 0.15, status: 'verified', source: DEEPSEEK_SRC, note: '旧名由 V4.1-Flash 承接，按 Flash 价计费' },
   { id: 'deepseek-v4-pro', provider: 'DeepSeek', match: 'deepseek-v4-pro*', inputPerM: 0.66, outputPerM: 1.98, cacheReadPerM: 0.022, cacheWritePerM: 0.66, status: 'verified', source: DEEPSEEK_SRC, note: '低谷价；高峰为 2 倍' },
 
-  // ── 待确认：官方 API 价目表未列，禁止推算 ────────────────────
+  // ── 智谱 GLM（官方人民币价 ÷ 7.1）──────────────────────────
+  { id: 'zhipu-glm-5.3', provider: 'Zhipu', match: 'glm-5.3', inputPerM: cny(8), outputPerM: cny(28), cacheReadPerM: cny(2), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥8/¥28（命中 ¥2）/百万，按 7.1 折算' },
+  { id: 'zhipu-glm-5.3-flash', provider: 'Zhipu', match: 'glm-5.3-flash*', inputPerM: cny(0.8), outputPerM: cny(2.8), cacheReadPerM: cny(0.23), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥0.8/¥2.8（命中 ¥0.23）/百万，按 7.1 折算' },
+  { id: 'zhipu-glm-5.3-flashx', provider: 'Zhipu', match: 'glm-5.3-flashx*', inputPerM: cny(2), outputPerM: cny(7), cacheReadPerM: cny(0.57), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥2/¥7（命中 ¥0.57）/百万，按 7.1 折算' },
+  { id: 'zhipu-glm-5.2', provider: 'Zhipu', match: 'glm-5.2*', inputPerM: cny(8), outputPerM: cny(28), cacheReadPerM: cny(2), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥8/¥28（命中 ¥2）/百万，按 7.1 折算' },
+  { id: 'zhipu-glm-5.1', provider: 'Zhipu', match: 'glm-5.1*', inputPerM: cny(6), outputPerM: cny(24), cacheReadPerM: cny(1.3), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '≤32K 档；≥32K 为 ¥8/¥28，按 7.1 折算' },
+  { id: 'zhipu-glm-5', provider: 'Zhipu', match: 'glm-5*', inputPerM: cny(4), outputPerM: cny(18), cacheReadPerM: cny(1), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '≤32K 档；≥32K 为 ¥6/¥22，按 7.1 折算' },
+
+  // ── 待确认：官方价目表未列，禁止推算 ────────────────────────
   { id: 'openai-codex', provider: 'OpenAI', match: 'codex-*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: 'Codex 走订阅额度，API 定价页无 token 单价，需查订阅账单后手工补录' },
-  { id: 'tencent-hy', provider: 'Tencent', match: 'hy*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: '未找到官方公开单价' },
-  { id: 'zhipu-glm', provider: 'Zhipu', match: 'glm-*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: '未找到官方公开单价' },
+  { id: 'tencent-hy', provider: 'Tencent', match: 'hy*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: 'CodeBuddy 内部别名（hy3/hy4…），混元官方刊例价无对应项' },
+  { id: 'zhipu-ioa', provider: 'Zhipu', match: 'glm-*-ioa', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: '带 -ioa 后缀的内部变体，官方价目表未列' },
   { id: 'fallback', provider: '未知', match: '*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: '未匹配任何已核实模型' }
 ]
