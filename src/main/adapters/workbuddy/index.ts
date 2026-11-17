@@ -1,73 +1,69 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import type { AdapterCapabilities, ToolId } from '@shared/types'
-import type { AdapterContext } from '../base'
-import { BaseAdapter, type DetectResult } from '../base'
-import { withReadonlyDb } from '../../collectors/sqlite-reader'
-import { TOOL_PATHS, firstExisting, homePath } from '../../collectors/paths'
+import type { AdapterContext, DetectResult } from '../base'
+import { BaseAdapter } from '../base'
+import { JsonlTailer, type LineContext } from '../../collectors/jsonl-tailer'
+import { TOOL_PATHS, homePath } from '../../collectors/paths'
 import { isInstalled } from '../../collectors/process-probe'
 
-interface SessionRow {
-  id: string
-  title: string | null
-  cwd: string | null
-  status: string | null
-  model: string | null
-  created_at: number | null
-  updated_at: number | null
-  last_activity_at: number | null
-}
-
-interface UsageRow {
-  session_id: string
-  used: number | null
-  size: number | null
-  updated_at: number | null
-  credit_json: string | null
-}
-
 /**
- * WorkBuddy 适配器（Tencent 桌面端）。
- * 数据源：~/.workbuddy/workbuddy.db（只读打开，WAL 安全）
- * - sessions 表给出会话生命周期与模型
- * - session_usage.used 为"上下文占用量"（非累计计费输入），归类为 partial
- * - credit_json 为各 turn 的积分消耗，无法换算为 USD，仅用于任务存在性判定
- * 因此 tokensSource 标记 partial，界面会显示"部分字段"徽标。
+ * WorkBuddy 适配器（腾讯桌面端 / CLI）。
+ *
+ * 数据源（与官方 token-dashboard 技能一致）：
+ *   ~/.workbuddy/projects/<工作区 slug>/<会话>.jsonl
+ *   每条记录的 providerData.rawUsage 就是**请求级真实 usage**，
+ *   含 prompt / completion / 缓存命中与写入，可直接计价。
+ *
+ *   <会话>/subagents/agent-*.jsonl 里的子代理请求按路径归属到父会话。
+ *
+ * 状态：仍用心跳文件驱动（<pid>.json），因为 JSONL 只在回合结束时落盘。
  */
 export class WorkBuddyAdapter extends BaseAdapter {
   readonly id: ToolId = 'workbuddy'
   readonly displayName = 'WorkBuddy'
-  readonly channel = 'sqlite' as const
+  readonly channel = 'jsonl' as const
   readonly capabilities: AdapterCapabilities = {
     tokens: true,
-    liveStream: false,
+    liveStream: true,
     bridgeRequired: false
   }
 
-  private timer: NodeJS.Timeout | null = null
+  private tailer: JsonlTailer | null = null
   private heartbeatTimer: NodeJS.Timeout | null = null
-  private readonly seenCredits = new Map<string, number>()
+  private readonly titles = new Map<string, string>()
 
   async detect(): Promise<DetectResult> {
+    const projects = join(homePath('.workbuddy'), 'projects')
+    if (existsSync(projects)) {
+      return { installed: true, dataPath: projects }
+    }
+    // 兼容旧路径探测
     const spec = TOOL_PATHS.workbuddy()
-    const dbPath = existsSync(spec.primary) ? spec.primary : null
     return {
-      installed: isInstalled('workbuddy', dbPath),
-      dataPath: dbPath,
-      message: dbPath ? undefined : '未找到 ~/.workbuddy/workbuddy.db'
+      installed: isInstalled('workbuddy', spec.primary),
+      dataPath: existsSync(spec.primary) ? spec.primary : null,
+      message: '未找到 ~/.workbuddy/projects，无法读取会话日志'
     }
   }
 
   protected async onStart(ctx: AdapterContext): Promise<void> {
-    const dbPath = this.dataPath
-    if (!dbPath) return
-    const interval = Math.max(3000, ctx.settings().desktopPollMs)
-    await this.poll(ctx, dbPath)
-    this.timer = setInterval(() => {
-      void this.poll(ctx, dbPath)
-    }, interval)
+    const root = this.dataPath
+    if (root) {
+      this.tailer = new JsonlTailer({
+        roots: [root],
+        glob: '**/*.jsonl',
+        depth: 3,
+        debounceMs: ctx.settings().fileDebounceMs,
+        backfillDays: Math.max(ctx.settings().backfillDays, 7),
+        maxBytesPerRead: 8 * 1024 * 1024,
+        cursors: ctx.cursors,
+        onLine: (line, meta) => this.handleLine(line, meta),
+        onError: (error) => this.fail(error)
+      })
+      await this.tailer.start()
+    }
 
-    // SQLite 的 last_activity 粒度较粗；心跳文件才是"正在运行"的实时信号
     const heartbeatDir = join(homePath('.workbuddy'), 'sessions')
     const beat = (): void => {
       void this.pollSessionHeartbeats(heartbeatDir, 'WorkBuddy').catch((error) =>
@@ -76,95 +72,183 @@ export class WorkBuddyAdapter extends BaseAdapter {
     }
     beat()
     this.heartbeatTimer = setInterval(beat, Math.max(3000, ctx.settings().processProbeMs))
-    console.log(`[adapter:workbuddy] polling every ${interval}ms (+heartbeat)`)
+    console.log('[adapter:workbuddy] started (jsonl + heartbeat)')
   }
 
   protected async onStop(): Promise<void> {
-    if (this.timer) clearInterval(this.timer)
-    this.timer = null
+    await this.tailer?.stop()
+    this.tailer = null
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
+    this.heartbeatTimer = null
   }
 
-  private async poll(ctx: AdapterContext, dbPath: string): Promise<void> {
-    if (ctx.isPaused()) return
+  /** 子代理文件按路径归属父会话，避免一个会话裂成多条任务 */
+  private sessionIdOf(meta: LineContext, recordSessionId: string | undefined): string {
+    const parts = meta.relPath.split('/')
+    const subIndex = parts.indexOf('subagents')
+    if (subIndex > 0) return parts[subIndex - 1]
+    return recordSessionId ?? basename(meta.relPath, '.jsonl')
+  }
+
+  private handleLine(line: string, meta: LineContext): void {
+    let obj: Record<string, unknown>
     try {
-      const rows = withReadonlyDb(dbPath, (db) => this.readRows(db))
-      if (!rows) return
-      for (const item of rows) this.emitSession(item, ctx)
-    } catch (error) {
-      this.fail(error)
+      obj = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      return
     }
-  }
 
-  private readRows(db: import('better-sqlite3').Database): Array<{
-    session: SessionRow
-    usage: UsageRow | null
-  }> {
-    const hasSessions = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'")
-      .get()
-    if (!hasSessions) return []
+    const type = typeof obj.type === 'string' ? obj.type : ''
+    const sessionId = this.sessionIdOf(meta, str(obj.sessionId))
+    if (!sessionId) return
+    const ts = num(obj.timestamp)
+    const cwd = str(obj.cwd)
+    const project = cwd ? cwd.split('/').filter(Boolean).pop() : undefined
 
-    const sessions = db
-      .prepare(
-        `SELECT id, title, cwd, status, model, created_at, updated_at, last_activity_at
-         FROM sessions
-         WHERE deleted_at IS NULL OR deleted_at = 0
-         ORDER BY COALESCE(last_activity_at, updated_at, created_at) DESC
-         LIMIT 60`
-      )
-      .all() as SessionRow[]
+    // 会话标题：WorkBuddy 自己用 ai-title 事件命名
+    if (type === 'ai-title') {
+      const title = str(obj.aiTitle)
+      if (!title) return
+      if (this.titles.get(sessionId) === title) return
+      this.titles.set(sessionId, title)
+      this.push({
+        tool: this.id,
+        externalSessionId: sessionId,
+        ts: ts || Date.now(),
+        title,
+        workspace: cwd,
+        project,
+        authoritativeTitle: true,
+        tokensSource: 'unavailable',
+        skipEventLog: true,
+        dedupeKey: `wb:title:${sessionId}:${title}`,
+        ...emptyUsage()
+      })
+      return
+    }
 
-    const hasUsage = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='session_usage'")
-      .get()
-    const usageStmt = hasUsage
-      ? db.prepare('SELECT session_id, used, size, updated_at, credit_json FROM session_usage WHERE session_id = ?')
-      : null
+    if (type === 'session-meta') {
+      this.push({
+        tool: this.id,
+        externalSessionId: sessionId,
+        ts: ts || Date.now(),
+        title: this.titles.get(sessionId),
+        workspace: cwd,
+        project,
+        startedAtHint: ts || undefined,
+        tokensSource: 'unavailable',
+        skipEventLog: true,
+        dedupeKey: `wb:meta:${sessionId}`,
+        ...emptyUsage()
+      })
+      return
+    }
 
-    return sessions.map((session) => ({
-      session,
-      usage: usageStmt ? ((usageStmt.get(session.id) as UsageRow | undefined) ?? null) : null
-    }))
-  }
+    // 轮次边界：用户消息开启一轮，assistant 完成时结束
+    if (type === 'message') {
+      const role = str(obj.role)
+      if (role === 'user') {
+        this.push({
+          tool: this.id,
+          externalSessionId: sessionId,
+          ts: ts || Date.now(),
+          title: this.titles.get(sessionId),
+          workspace: cwd,
+          project,
+          authoritativeTitle: true,
+          tokensSource: 'unavailable',
+          skipEventLog: true,
+          turnStart: true,
+          dedupeKey: `wb:turn:${sessionId}:${str(obj.id) ?? ts}`,
+          ...emptyUsage()
+        })
+      } else if (role === 'assistant' && str(obj.status) === 'completed') {
+        this.push({
+          tool: this.id,
+          externalSessionId: sessionId,
+          ts: ts || Date.now(),
+          title: this.titles.get(sessionId),
+          workspace: cwd,
+          project,
+          authoritativeTitle: true,
+          tokensSource: 'unavailable',
+          skipEventLog: true,
+          turnEnd: true,
+          endSignal: true,
+          dedupeKey: `wb:end:${sessionId}:${str(obj.id) ?? ts}`,
+          ...emptyUsage()
+        })
+      }
+      return
+    }
 
-  private emitSession(
-    item: { session: SessionRow; usage: UsageRow | null },
-    ctx: AdapterContext
-  ): void {
-    const { session, usage } = item
-    const startedAt = toMs(session.created_at) ?? Date.now()
-    const lastActivity = toMs(session.last_activity_at) ?? toMs(session.updated_at) ?? startedAt
-    const used = Math.max(0, usage?.used ?? 0)
-    const previous = this.seenCredits.get(session.id) ?? 0
-    // used 为上下文占用量，取"较上次的增长"作为增量，避免每次轮询重复累加
-    const delta = used > previous ? used - previous : 0
-    if (used !== previous) this.seenCredits.set(session.id, used)
+    // 用量：providerData.rawUsage 是请求级真实 usage
+    const provider = isRecord(obj.providerData) ? obj.providerData : null
+    const usage = provider && isRecord(provider.rawUsage) ? provider.rawUsage : null
+    if (!usage) return
 
-    const isActive = (session.status ?? '').toLowerCase() === 'active'
-    if (delta === 0 && !isActive && previous > 0) return
+    // WorkBuddy 用的字段名与 OpenAI 不同：命中/写入都在 prompt_cache_* 上，
+    // cache_read_input_tokens 基本恒为 0，不能拿它当主口径。
+    const cached = num(
+      usage.prompt_cache_hit_tokens ??
+        usage.cache_read_input_tokens ??
+        (isRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details.cached_tokens : 0)
+    )
+    const cacheWrite = num(usage.prompt_cache_write_tokens ?? usage.cache_creation_input_tokens)
+    const prompt = num(usage.prompt_tokens)
+    const miss = num(usage.prompt_cache_miss_tokens)
+    const input = miss > 0 ? miss : Math.max(0, prompt - cached)
+    const output = num(usage.completion_tokens)
+    const reasoning = isRecord(usage.completion_tokens_details)
+      ? num(usage.completion_tokens_details.reasoning_tokens)
+      : 0
+
+    if (input + output + cached + cacheWrite === 0) return
 
     this.push({
       tool: this.id,
-      externalSessionId: session.id,
-      ts: lastActivity,
-      title: session.title?.trim() || undefined,
-      workspace: session.cwd ?? undefined,
-      model: session.model ?? undefined,
-      // 上下文占用量映射为输入侧观测值，明确标注 partial
-      inputTokens: delta,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-      reasoningTokens: 0,
-      tokensSource: 'partial',
-      dedupeKey: `usage:${session.id}:${used}:${lastActivity}`,
-      endSignal: !isActive && previous > 0
+      externalSessionId: sessionId,
+      ts: ts || Date.now(),
+      title: this.titles.get(sessionId),
+      workspace: cwd,
+      project,
+      authoritativeTitle: true,
+      model: provider ? (str(provider.model) ?? str(provider.requestModelName)) : undefined,
+      inputTokens: input,
+      outputTokens: output,
+      cacheReadTokens: cached,
+      cacheWriteTokens: cacheWrite,
+      reasoningTokens: reasoning,
+      tokensSource: 'native',
+      dedupeKey: `wb:usage:${sessionId}:${str(obj.id) ?? `${ts}:${prompt}:${output}`}`
     })
   }
 }
 
-function toMs(value: number | null | undefined): number | null {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null
-  // WorkBuddy 部分表使用秒级时间戳
-  return value < 1_000_000_000_000 ? value * 1000 : value
+function emptyUsage(): {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+} {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reasoningTokens: 0
+  }
+}
+
+function num(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
