@@ -265,7 +265,7 @@ export abstract class BaseAdapter implements ToolAdapter {
       phase: 'active',
       ts: Date.now(),
       source: 'process',
-      title: `${label} · 进程会话`
+      // 不携带标题：进程信号只维持已有任务的状态，不参与命名
     })
     return true
   }

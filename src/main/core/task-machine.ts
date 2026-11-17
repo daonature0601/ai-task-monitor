@@ -229,6 +229,13 @@ export class TaskMachine {
       }
     }
 
+    // 「进程存在」是最弱的信号：它只能证明应用开着，不能证明有人在用。
+    // 因此它只用于维持已有任务的状态，绝不凭空新建任务 ——
+    // 否则打开 DeepSeek Harness / 元宝这类无本地落盘的工具就会冒出一个"进程会话"。
+    if (!task && signal.source === 'process') {
+      return { applied: false, taskId }
+    }
+
     if (!task) {
       task = {
         id: taskId,
