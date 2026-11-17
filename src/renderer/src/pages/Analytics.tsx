@@ -5,7 +5,7 @@ import type { StatsPayload } from '@shared/types'
 import { formatCost, formatDuration, formatRate, formatTokens } from '@shared/format'
 import { useMonitor } from '../store/monitor'
 import { Card, Metric, SectionTitle, ToolAvatar } from '../components/ui/atoms'
-import { CacheEfficiency, CostTrend, useChartReady } from '../components/charts'
+import { CacheEfficiency, ChartTooltip, CostTrend, useChartReady } from '../components/charts'
 import { cn, toolName } from '../lib/utils'
 
 type RangeKey = 'today' | 'week' | 'month' | 'custom'
@@ -237,13 +237,8 @@ export function Analytics(): JSX.Element {
                 <XAxis dataKey="label" tickLine={false} axisLine={false} />
                 <YAxis tickLine={false} axisLine={false} width={44} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{
-                    background: '#111721',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: 10,
-                    fontSize: 12
-                  }}
-                  formatter={(value: number) => [`${value} 个任务`, '数量']}
+                  cursor={{ fill: 'rgba(255,255,255,0.045)' }}
+                  content={<ChartTooltip valueText={(value) => `${value} 个任务`} nameText={() => '数量'} />}
                 />
                 <Bar dataKey="count" radius={[5, 5, 0, 0]} isAnimationActive={false}>
                   {bucketData.map((entry, index) => (

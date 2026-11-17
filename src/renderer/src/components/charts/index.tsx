@@ -18,13 +18,65 @@ import { TOOL_META } from '@shared/types'
 import { formatCost, formatRate, formatTokens } from '@shared/format'
 import { cn, toolName } from '../../lib/utils'
 
-const TOOLTIP_STYLE = {
-  background: '#111721',
-  border: '1px solid rgba(255,255,255,0.08)',
-  borderRadius: 10,
-  fontSize: 12,
-  color: '#E8EEF7'
-} as const
+interface TooltipItem {
+  name?: string | number
+  value?: number | string
+  color?: string
+  payload?: Record<string, unknown>
+}
+
+/**
+ * 统一的自定义 Tooltip。
+ * 之前用 recharts 默认实现 + contentStyle，条目名称取的是 series 的 stroke/fill，
+ * 饼图的渐变或纯色在暗色底上对比度极差，出现「文字看不清」。
+ * 这里改为自己画：圆点取色、名称用 text-fg-mid、数值用 text-fg-hi。
+ */
+export function ChartTooltip({
+  active,
+  payload,
+  label,
+  valueText,
+  nameText
+}: {
+  active?: boolean
+  payload?: TooltipItem[]
+  label?: string | number
+  valueText?: (value: number, name: string) => string
+  nameText?: (name: string) => string
+}): JSX.Element | null {
+  if (!active || !payload || payload.length === 0) return null
+  return (
+    // 背景用内联样式而非 Tailwind 任意值：`bg-[#0E141E]/96` 不会被编译产出规则，
+    // 结果只剩 backdrop-blur，浮层变成半透明玻璃、文字被图表颜色穿透。
+    <div
+      className="pointer-events-none min-w-[136px] rounded-lg border border-white/[0.14] px-2.5 py-2 shadow-[0_18px_44px_-14px_rgba(0,0,0,0.92)]"
+      style={{ background: 'rgba(11,16,24,0.98)' }}
+    >
+      {label !== undefined && label !== '' && (
+        <p className="mb-1 text-[10px] tracking-wide text-[#9AA9BC]">{String(label)}</p>
+      )}
+      <div className="space-y-1">
+        {payload.map((item, index) => {
+          const name = String(item.name ?? '')
+          const value = typeof item.value === 'number' ? item.value : Number(item.value ?? 0)
+          const dot = item.color ?? (item.payload?.fill as string | undefined) ?? '#8A99AD'
+          return (
+            <div key={`${name}-${index}`} className="flex items-center gap-2 text-[11px]">
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full ring-1 ring-black/40"
+                style={{ background: dot }}
+              />
+              <span className="text-[#C6D2E1]">{nameText ? nameText(name) : name}</span>
+              <span className="num ml-auto pl-3 font-medium text-fg-hi">
+                {valueText ? valueText(value, name) : value.toLocaleString('zh-CN')}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function shortDate(date: string): string {
   return date.slice(5)
@@ -109,11 +161,13 @@ export function CostTrend({
         <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={18} />
         <YAxis tickLine={false} axisLine={false} width={54} tickFormatter={(v: number) => formatCost(v, currency, fxRate)} />
         <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          formatter={(value: number, name: string) => [
-            formatCost(value, currency, fxRate),
-            toolName(name as ToolId)
-          ]}
+          cursor={{ stroke: 'rgba(255,255,255,0.14)', strokeDasharray: '3 3' }}
+          content={
+            <ChartTooltip
+              valueText={(value) => formatCost(value, currency, fxRate)}
+              nameText={(name) => toolName(name as ToolId)}
+            />
+          }
         />
         {tools.map((tool) => (
           <Area
@@ -176,11 +230,12 @@ export function ToolDistribution({
               ))}
             </Pie>
             <Tooltip
-              contentStyle={TOOLTIP_STYLE}
-              formatter={(value: number, name: string) => [
-                formatCost(value, currency, fxRate),
-                toolName(name as ToolId)
-              ]}
+              content={
+                <ChartTooltip
+                  valueText={(value) => formatCost(value, currency, fxRate)}
+                  nameText={(name) => toolName(name as ToolId)}
+                />
+              }
             />
           </PieChart>
         </ResponsiveContainer>
@@ -188,7 +243,7 @@ export function ToolDistribution({
           <span className="num text-body font-semibold text-fg-hi">
             {formatCost(total, currency, fxRate)}
           </span>
-          <span className="text-[10px] text-fg-lo">合计</span>
+          <span className="text-[10px] text-fg-mid">合计</span>
         </div>
       </div>
       <div className="min-w-0 flex-1 space-y-1.5">
@@ -239,8 +294,8 @@ export function CacheEfficiency({ data }: { data: CachePoint[] }): JSX.Element {
           tickFormatter={(value: number) => `${value}%`}
         />
         <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          formatter={(value: number) => [formatRate(value / 100), '输入缓存命中率']}
+          cursor={{ stroke: 'rgba(255,255,255,0.14)', strokeDasharray: '3 3' }}
+          content={<ChartTooltip valueText={(value) => formatRate(value / 100)} nameText={() => '输入缓存命中率'} />}
         />
         <Line
           type="monotone"

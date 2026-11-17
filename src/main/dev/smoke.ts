@@ -350,6 +350,45 @@ async function captureUi(win: Electron.BrowserWindow): Promise<void> {
            })()`
         )
         console.log('[smoke] chart-diag', diag)
+
+        // 悬停柱状图，验证自定义 Tooltip 的文案与底色
+        const hover = await win.webContents.executeJavaScript(
+          `(async () => {
+             const bars = Array.from(document.querySelectorAll('.recharts-bar-rectangle'));
+             const target = bars[1] || bars[0];
+             if (!target) return 'no-bar';
+             target.scrollIntoView({ block: 'center' });
+             await new Promise((res) => setTimeout(res, 300));
+             const r = target.getBoundingClientRect();
+             const cx = r.left + r.width / 2;
+             const cy = r.top + r.height / 2;
+             const wrapper = target.closest('.recharts-wrapper') || document.body;
+             for (const type of ['mousemove', 'mouseover']) {
+               wrapper.dispatchEvent(
+                 new MouseEvent(type, { clientX: cx, clientY: cy, bubbles: true })
+               );
+             }
+             await new Promise((res) => setTimeout(res, 600));
+             const chartRoot = target.closest('.recharts-wrapper');
+             const tip = chartRoot ? chartRoot.querySelector('.recharts-tooltip-wrapper') : null;
+             const inner = tip ? tip.firstElementChild : null;
+             const style = inner ? getComputedStyle(inner) : null;
+             const nameEl = inner ? inner.querySelector('.num, span') : null;
+             return JSON.stringify({
+               text: tip ? (tip.textContent || '').replace(/\s+/g, ' ').trim() : null,
+               bg: style ? style.backgroundColor : null,
+               backdrop: style ? style.backdropFilter : null,
+               cursorFill: (() => {
+                 const c = document.querySelector('.recharts-tooltip-cursor');
+                 return c ? getComputedStyle(c).fill : null;
+               })(),
+               nameColor: nameEl ? getComputedStyle(nameEl).color : null
+             });
+           })()`
+        )
+        console.log('[smoke] bar-tooltip', hover)
+        const hoverShot = await win.webContents.capturePage()
+        await writeFile(join(app.getPath('temp'), 'atm-shot-3-统计-hover.png'), hoverShot.toPNG())
       }
     }
   } catch (error) {
