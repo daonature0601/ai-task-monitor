@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, Search } from 'lucide-react'
-import type { TaskQuery, TaskStatus, ToolId } from '@shared/types'
+import type { TaskQuery, ToolId } from '@shared/types'
 import { TOOL_IDS, TOOL_META } from '@shared/types'
 import { useMonitor } from '../store/monitor'
 import { useNow } from '../hooks/useTicker'
@@ -8,35 +8,51 @@ import { Card } from '../components/ui/atoms'
 import { TaskTable } from '../components/tasks/TaskTable'
 import { cn, toolName } from '../lib/utils'
 
-type RangeKey = 'today' | 'week' | 'month' | 'all'
+type RangeKey = 'today' | 'week' | 'month' | 'custom'
 
 const RANGE_LABEL: Record<RangeKey, string> = {
   today: '今天',
   week: '近 7 天',
   month: '近 30 天',
-  all: '全部'
+  custom: '自定义'
 }
 
-type StatusFilter = TaskStatus | 'all' | 'active'
+/** 本地日期字符串（YYYY-MM-DD） */
+function localDay(ts: number): string {
+  const d = new Date(ts)
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+type StatusFilter = 'all' | 'active' | 'ended'
 
 const STATUS_OPTIONS: Array<{ key: StatusFilter; label: string }> = [
   { key: 'all', label: '全部' },
   { key: 'active', label: '进行中' },
-  { key: 'running', label: '运行中' },
-  { key: 'idle', label: '静默' },
   { key: 'ended', label: '已结束' }
 ]
 
-function rangeToFrom(range: RangeKey): number | undefined {
+function resolveRange(
+  range: RangeKey,
+  custom: { from: string; to: string }
+): { from: number; to: number } {
   const now = Date.now()
+  if (range === 'custom' && custom.from && custom.to) {
+    const rawFrom = new Date(`${custom.from}T00:00:00`).getTime()
+    const rawTo = new Date(`${custom.to}T23:59:59.999`).getTime()
+    if (Number.isFinite(rawFrom) && Number.isFinite(rawTo)) {
+      return {
+        from: Math.min(rawFrom, rawTo),
+        to: Math.min(Math.max(rawFrom, rawTo), now)
+      }
+    }
+  }
   if (range === 'today') {
     const start = new Date(now)
     start.setHours(0, 0, 0, 0)
-    return start.getTime()
+    return { from: start.getTime(), to: now }
   }
-  if (range === 'week') return now - 7 * 86_400_000
-  if (range === 'month') return now - 30 * 86_400_000
-  return undefined
+  return { from: now - (range === 'week' ? 7 : 30) * 86_400_000, to: now }
 }
 
 export function Tasks(): JSX.Element {
@@ -47,6 +63,8 @@ export function Tasks(): JSX.Element {
   const [status, setStatus] = useState<StatusFilter>('all')
   const [tools, setTools] = useState<ToolId[]>([])
   const [range, setRange] = useState<RangeKey>('week')
+  const [customFrom, setCustomFrom] = useState(() => localDay(Date.now() - 6 * 86_400_000))
+  const [customTo, setCustomTo] = useState(() => localDay(Date.now()))
   const [keyword, setKeyword] = useState('')
   const [rows, setRows] = useState<import('@shared/types').TaskSnapshot[]>([])
   const [total, setTotal] = useState(0)
@@ -58,22 +76,19 @@ export function Tasks(): JSX.Element {
   const now = useNow(rows.some((task) => task.status === 'running'))
   const signedAt = snapshot?.generatedAt ?? 0
 
-  const query = useMemo<TaskQuery>(
-    () => ({
+  const query = useMemo<TaskQuery>(() => {
+    const { from, to } = resolveRange(range, { from: customFrom, to: customTo })
+    return {
       tools: tools.length > 0 ? tools : undefined,
       statuses:
-        status === 'all'
-          ? undefined
-          : status === 'active'
-            ? ['running', 'idle']
-            : [status],
-      from: rangeToFrom(range),
+        status === 'all' ? undefined : status === 'active' ? ['running', 'idle'] : ['ended'],
+      from,
+      to,
       keyword: keyword.trim() || undefined,
       limit: 300,
       offset: 0
-    }),
-    [tools, status, range, keyword]
-  )
+    }
+  }, [tools, status, range, customFrom, customTo, keyword])
 
   useEffect(() => {
     let disposed = false
@@ -98,8 +113,7 @@ export function Tasks(): JSX.Element {
   }
 
   const exportCsv = async (): Promise<void> => {
-    const to = Date.now()
-    const from = rangeToFrom(range) ?? to - 30 * 86_400_000
+    const { from, to } = resolveRange(range, { from: customFrom, to: customTo })
     const result = await window.monitor.exportCsv(from, to)
     notify(
       result.saved ? `已导出 ${result.rows ?? 0} 条任务记录` : '已取消导出',
@@ -144,6 +158,38 @@ export function Tasks(): JSX.Element {
               </button>
             ))}
           </div>
+
+          {range === 'custom' && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-0.5">
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                className="field h-[24px] w-[124px] px-1.5 py-0 text-caption [color-scheme:dark]"
+              />
+              <span className="text-caption text-fg-lo">至</span>
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom}
+                max={localDay(Date.now())}
+                onChange={(event) => setCustomTo(event.target.value)}
+                className="field h-[24px] w-[124px] px-1.5 py-0 text-caption [color-scheme:dark]"
+              />
+              <span className="num text-[10px] text-fg-lo">
+                {Math.max(
+                  1,
+                  Math.round(
+                    (new Date(`${customTo}T00:00:00`).getTime() -
+                      new Date(`${customFrom}T00:00:00`).getTime()) /
+                      86_400_000
+                  ) + 1
+                )}{' '}
+                天
+              </span>
+            </div>
+          )}
 
           <div className="relative ml-auto flex items-center">
             <Search size={13} className="pointer-events-none absolute left-2.5 text-fg-lo" />

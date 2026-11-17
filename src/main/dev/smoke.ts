@@ -286,6 +286,29 @@ async function captureUi(win: Electron.BrowserWindow): Promise<void> {
         await new Promise((resolve) => setTimeout(resolve, 600))
       }
 
+      if (label === '任务') {
+        // 校验筛选器：无「运行中/静默」独立 tab，且「自定义」能展开日期区间
+        const filters = await win.webContents.executeJavaScript(
+          `(async () => {
+             const texts = Array.from(document.querySelectorAll('button')).map((b) =>
+               (b.textContent || '').trim()
+             );
+             const custom = Array.from(document.querySelectorAll('button')).find(
+               (b) => (b.textContent || '').trim() === '自定义'
+             );
+             if (custom) custom.click();
+             await new Promise((r) => setTimeout(r, 400));
+             const inputs = Array.from(document.querySelectorAll('input[type=date]'));
+             return JSON.stringify({
+               tabs: texts.filter((t) => ['全部', '进行中', '已结束', '运行中', '静默'].includes(t)),
+               hasCustomTab: !!custom,
+               dateInputs: inputs.length
+             });
+           })()`
+        )
+        console.log('[smoke] task-filters', filters)
+      }
+
       if (label === '统计') {
         // 验证自定义区间：把起止都设为今天，结果应与「今日」一致
         const rangeProbe = await win.webContents.executeJavaScript(
