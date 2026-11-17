@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  StateSignal,
   AdapterHealth,
   AdapterInfo,
   AppSettings,
@@ -18,8 +19,10 @@ import { HeartbeatWatcher, type HeartbeatSession } from '../collectors/session-h
 export interface AdapterContext {
   settings: () => AppSettings
   pricing: () => PricingRow[]
-  /** 归一化增量入口（由状态机消费） */
+  /** 归一化增量入口（由状态机消费），只承载用量信息 */
   emit: (delta: UsageDelta) => void
+  /** 运行时状态信号入口（hook / 心跳 / 进程 / 桥接） */
+  emitState: (signal: StateSignal) => void
   cursors: CursorStore
   /** 记录错误：指数退避由 AdapterManager 处理 */
   reportError: (error: unknown, message?: string) => void
@@ -138,6 +141,12 @@ export abstract class BaseAdapter implements ToolAdapter {
     }
   }
 
+  /** 运行时状态出口：只上报状态，不写用量流水 */
+  protected emitState(signal: StateSignal): void {
+    if (!this.ctx || this.ctx.isPaused()) return
+    this.ctx.emitState(signal)
+  }
+
   /** 统一出口：校验数据合法性后交给状态机 */
   protected push(delta: UsageDelta): void {
     if (!this.ctx) return
@@ -211,38 +220,29 @@ export abstract class BaseAdapter implements ToolAdapter {
       alive.add(taskKey)
       this.heartbeatSeen.set(taskKey, session.lastHeartbeat)
 
-      const bucket = Math.floor(session.lastHeartbeat / 30_000)
-      this.push({
+      this.emitState({
         tool: this.id,
-        externalSessionId: taskKey,
+        sessionId: taskKey,
+        phase: 'active',
         ts: session.lastHeartbeat,
+        source: 'heartbeat',
         title: options.titleFor
           ? options.titleFor(session)
           : heartbeatTitle(session.cwd, label, session.startedAt),
         workspace: session.cwd,
-        startedAtHint: session.startedAt,
-        tokensSource: 'unavailable',
-        skipEventLog: true,
-        authoritativeTitle: true,
-        dedupeKey: `hb:${taskKey}:${bucket}`,
-        ...emptyUsage()
+        startedAtHint: session.startedAt
       })
     }
 
     // 心跳文件消失或超时 → 会话结束
     for (const [taskKey, lastBeat] of this.heartbeatSeen) {
       if (alive.has(taskKey)) continue
-      const sessionId = taskKey
-      this.push({
+      this.emitState({
         tool: this.id,
-        externalSessionId: sessionId,
+        sessionId: taskKey,
+        phase: 'end',
         ts: Math.min(lastBeat, now),
-        title: label,
-        tokensSource: 'unavailable',
-        skipEventLog: true,
-        endSignal: true,
-        dedupeKey: `hb-end:${sessionId}:${lastBeat}`,
-        ...emptyUsage()
+        source: 'heartbeat'
       })
       this.heartbeatSeen.delete(taskKey)
     }
@@ -259,15 +259,13 @@ export abstract class BaseAdapter implements ToolAdapter {
     const running = await isAnyRunning(matchers).catch(() => false)
     if (!running) return false
 
-    const bucket = Math.floor(Date.now() / 60_000)
-    this.push({
+    this.emitState({
       tool: this.id,
-      externalSessionId: `alive-${this.id}-${new Date().toISOString().slice(0, 10)}`,
+      sessionId: `alive-${this.id}-${new Date().toISOString().slice(0, 10)}`,
+      phase: 'active',
       ts: Date.now(),
-      title: `${label} · 进程会话（未接入桥接）`,
-      tokensSource: 'unavailable',
-      dedupeKey: `alive:${bucket}`,
-      ...emptyUsage()
+      source: 'process',
+      title: `${label} · 进程会话`
     })
     return true
   }

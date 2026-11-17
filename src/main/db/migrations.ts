@@ -110,6 +110,21 @@ const MIGRATIONS: Migration[] = [
     up: (db) => {
       db.exec(V2)
     }
+  },
+  {
+    /**
+     * v3：任务状态改为「运行时信号驱动」。
+     * state_source 记录状态来自 hook / heartbeat / bridge / process，
+     * 'none' 表示该工具没有运行时通道、状态只能由日志推断。
+     */
+    version: 3,
+    name: 'runtime-state-source',
+    up: (db) => {
+      db.exec(`
+ALTER TABLE tasks ADD COLUMN state_source TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE tasks ADD COLUMN last_state_at INTEGER;
+`)
+    }
   }
 ]
 

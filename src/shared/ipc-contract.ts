@@ -24,6 +24,9 @@ export const IPC = {
   settingsGet: 'monitor:settings:get',
   settingsUpdate: 'monitor:settings:update',
   settingsRebuild: 'monitor:settings:rebuild',
+  hooksStatus: 'monitor:hooks:status',
+  hooksInstall: 'monitor:hooks:install',
+  hooksRemove: 'monitor:hooks:remove',
   pricingGet: 'monitor:pricing:get',
   pricingUpdate: 'monitor:pricing:update',
   pricingReset: 'monitor:pricing:reset',
@@ -39,6 +42,14 @@ export const IPC = {
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
 
 /** preload 通过 contextBridge 暴露给渲染进程的 API 契约 */
+export interface HookStatus {
+  scriptPath: string
+  inboxPath: string
+  claude: boolean
+  codex: boolean
+  codexChained: boolean
+}
+
 export interface MonitorApi {
   getSnapshot: () => Promise<SnapshotPayload | null>
   onSnapshot: (handler: (snapshot: SnapshotPayload) => void) => () => void
@@ -52,6 +63,10 @@ export interface MonitorApi {
   updateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
   /** 清空派生数据并按指定天数重扫日志，用于恢复更早的历史 */
   rebuildHistory: (days: number) => Promise<AppSettings>
+  /** 状态挂钩：查询 / 安装 / 移除 */
+  getHookStatus: () => Promise<HookStatus>
+  installHooks: () => Promise<HookStatus>
+  removeHooks: () => Promise<HookStatus>
   getPricing: () => Promise<PricingRow[]>
   updatePricing: (rows: PricingRow[]) => Promise<PricingRow[]>
   resetPricing: () => Promise<PricingRow[]>

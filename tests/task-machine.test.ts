@@ -179,4 +179,43 @@ describe('TaskMachine 计费与汇总', () => {
     expect(summary.todayTasks).toBe(1)
     expect(summary.todayInputTokens).toBe(1000)
   })
+
+  it('运行时状态信号直接决定状态，不与日志事件混淆', () => {
+    const machine = makeMachine()
+    const now = Date.now()
+
+    machine.applyState({
+      tool: 'claude-code',
+      sessionId: 'hook-session',
+      phase: 'start',
+      ts: now,
+      source: 'hook'
+    })
+    const running = machine.list()[0]
+    expect(running.status).toBe('running')
+    expect(running.stateSource).toBe('hook')
+
+    // 日志里有事件也不能改变 hook 给出的状态
+    machine.ingest(delta({ ts: now + 1_000, tool: 'claude-code', externalSessionId: 'hook-session' }))
+    expect(machine.list()[0].status).toBe('running')
+
+    machine.applyState({
+      tool: 'claude-code',
+      sessionId: 'hook-session',
+      phase: 'end',
+      ts: now + 5_000,
+      source: 'hook'
+    })
+    const ended = machine.list()[0]
+    expect(ended.status).toBe('ended')
+    expect(ended.endedAt).toBe(now + 5_000)
+  })
+
+  it('状态来源只升不降：hook 不被进程探活覆盖', () => {
+    const machine = makeMachine()
+    const now = Date.now()
+    machine.applyState({ tool: 'codex', sessionId: 's', phase: 'start', ts: now, source: 'hook' })
+    machine.applyState({ tool: 'codex', sessionId: 's', phase: 'active', ts: now + 1000, source: 'process' })
+    expect(machine.list()[0].stateSource).toBe('hook')
+  })
 })

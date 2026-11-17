@@ -7,6 +7,14 @@ import { computeCacheHitRate, formatTimeFull } from '@shared/format'
 import { buildUserscript, scriptFileName } from '../bridge/userscripts'
 import type { Runtime } from '../runtime'
 import { getMainWindow, showMainWindow } from '../window'
+import { hookStatus, installHooks, removeHooks } from '../hooks/installer'
+import { appConfigDir } from '../collectors/paths'
+import { join } from 'node:path'
+
+/** 钩子脚本统一放在用户数据目录下，便于清理 */
+function hooksDir(): string {
+  return join(appConfigDir(app.getPath('userData')), 'hooks')
+}
 
 export function registerIpcHandlers(runtime: Runtime): void {
   ipcMain.handle(IPC.snapshotGet, () => runtime.getSnapshot())
@@ -105,6 +113,10 @@ export function registerIpcHandlers(runtime: Runtime): void {
     const window = typeof days === 'number' && Number.isFinite(days) ? days : 30
     return runtime.rebuildHistory(window)
   })
+
+  ipcMain.handle(IPC.hooksStatus, () => hookStatus(hooksDir()))
+  ipcMain.handle(IPC.hooksInstall, () => installHooks(hooksDir()))
+  ipcMain.handle(IPC.hooksRemove, () => removeHooks(hooksDir()))
 
   ipcMain.handle(IPC.pricingGet, () => runtime.getPricing())
   ipcMain.handle(IPC.pricingUpdate, (_event, rows: unknown) => {

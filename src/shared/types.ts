@@ -89,6 +89,10 @@ export interface TaskSnapshot extends TokenUsage {
   tokensSource: TokensSource
   eventCount: number
   alerts: AlertKind[]
+  /** 状态的来源：hook / heartbeat / bridge / process；none 表示无运行时信号 */
+  stateSource: StateSource
+  /** 最近一次状态信号时间，用于 TTL 判定；无信号时为 null */
+  lastStateAt: number | null
 }
 
 export interface AdapterCapabilities {
@@ -167,6 +171,29 @@ export interface AppSettings {
   bridgeEnabled: boolean
   bridgePort: number
   paused: boolean
+}
+
+/**
+ * 运行时状态信号 —— 由工具自身的 hook / 心跳 / 桥接推送产生，
+ * 与「日志里有新事件」无关，是任务状态的唯一权威来源。
+ */
+export type StatePhase = 'start' | 'active' | 'end'
+
+/** 状态来源：hook（工具钩子）> heartbeat（心跳文件）> bridge（网页推送）> process（进程存在） */
+export type StateSource = 'hook' | 'bridge' | 'io' | 'heartbeat' | 'process' | 'none'
+
+export interface StateSignal {
+  tool: ToolId
+  sessionId: string
+  phase: StatePhase
+  /** 事件时间（毫秒） */
+  ts: number
+  source: StateSource
+  title?: string
+  workspace?: string
+  model?: string
+  /** 会话真实开始时间，hook / 心跳可提供 */
+  startedAtHint?: number
 }
 
 export type PricingStatus = 'verified' | 'pending'

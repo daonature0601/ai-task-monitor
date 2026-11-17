@@ -38,7 +38,8 @@ export class CodexAdapter extends BaseAdapter {
   }
 
   private tailer: JsonlTailer | null = null
-  private readonly lastBeat = new Map<string, number>()
+  /** relPath → 上次 io 心跳的 30s 桶，避免每次追加都发信号 */
+  private readonly ioBucket = new Map<string, number>()
   private readonly sessions = new Map<string, SessionMeta>()
   private readonly totals = new Map<string, CodexTotals>()
   /** guardian_review 线程：内部审查，不计入任务 */
@@ -179,7 +180,10 @@ export class CodexAdapter extends BaseAdapter {
       session.model = payload.model
     }
 
-    this.beat(session, meta.relPath, meta.mtimeMs)
+    // 文件此刻仍在被写入 = 该会话正在工作。这是运行时 IO 观测，
+    // 不解析日志内容，也不改变 token/费用口径。
+    this.markIo(session, meta)
+
 
     if (type === 'event_msg' && payload && payload.type === 'token_count') {
       // 使用原始事件时间，避免把历史会话误判为"刚刚发生"
@@ -227,32 +231,6 @@ export class CodexAdapter extends BaseAdapter {
     }
   }
 
-  /**
-   * 活动心跳：Codex 只在回合结束才写 token_count，长回合里 90 秒无事件就会
-   * 被误判为「静默」。文件一旦有追加就刷新活跃度（每 30 秒合并一次，
-   * 不计入用量流水、不改 tokensSource）。
-   */
-  private beat(session: SessionMeta, relPath: string, mtimeMs: number): void {
-    // 只有「文件此刻仍在被写入」才算活跃；历史回填时不能伪造"正在运行"，
-    // 否则每个旧会话都会凭空多出一个 0 事件的任务。
-    if (Date.now() - mtimeMs > 180_000) return
-    const bucket = Math.floor(Date.now() / 30_000)
-    if (this.lastBeat.get(relPath) === bucket) return
-    this.lastBeat.set(relPath, bucket)
-    this.push({
-      tool: this.id,
-      externalSessionId: session.sessionId,
-      ts: Date.now(),
-      title: session.cwd ? basename(session.cwd) : undefined,
-      workspace: session.cwd,
-      model: session.model,
-      tokensSource: 'unavailable',
-      skipEventLog: true,
-      dedupeKey: `beat:${relPath}:${bucket}`,
-      ...emptyUsage()
-    })
-  }
-
   private handleSessionMeta(payload: Record<string, unknown>, meta: LineContext): void {
     // 守护审查（guardian_review）是 Codex 内部的安全判定线程，不属于用户任务，
     // 若纳入统计会让「实时任务」凭空多出几条。
@@ -292,6 +270,23 @@ export class CodexAdapter extends BaseAdapter {
       dedupeKey: `meta:${meta.relPath}`,
       authoritativeTitle: true,
       ...emptyUsage()
+    })
+  }
+
+  /** 刷新 io 活跃信号（30 秒合并一次，仅当文件 3 分钟内被写过） */
+  private markIo(session: SessionMeta, meta: LineContext): void {
+    if (Date.now() - meta.mtimeMs > 180_000) return
+    const bucket = Math.floor(Date.now() / 30_000)
+    if (this.ioBucket.get(meta.relPath) === bucket) return
+    this.ioBucket.set(meta.relPath, bucket)
+    this.emitState({
+      tool: this.id,
+      sessionId: session.sessionId,
+      phase: 'active',
+      ts: Date.now(),
+      source: 'io',
+      workspace: session.cwd,
+      model: session.model
     })
   }
 

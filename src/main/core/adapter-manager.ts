@@ -3,6 +3,7 @@ import type {
   AppSettings,
   BridgePayload,
   PricingRow,
+  StateSignal,
   ToolId,
   UsageDelta
 } from '@shared/types'
@@ -34,6 +35,7 @@ export class AdapterManager {
       settings: () => AppSettings
       pricing: () => PricingRow[]
       emit: (delta: UsageDelta) => void
+      emitState: (signal: StateSignal) => void
       cursors: CursorStore
     }
   ) {}
@@ -46,6 +48,7 @@ export class AdapterManager {
       settings: this.deps.settings,
       pricing: this.deps.pricing,
       emit: this.deps.emit,
+      emitState: this.deps.emitState,
       cursors: this.deps.cursors,
       isPaused: () => this.deps.settings().paused,
       reportError: (error, message) => this.recordError('unknown', error, message)

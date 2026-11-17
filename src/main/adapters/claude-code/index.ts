@@ -31,6 +31,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     bridgeRequired: false
   }
 
+  /** relPath → 上次 io 心跳的 30s 桶 */
+  private readonly ioBucket = new Map<string, number>()
   private tailer: JsonlTailer | null = null
   private readonly sessions = new Map<string, ClaudeSessionMeta>()
 
@@ -67,6 +69,22 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     this.tailer = null
   }
 
+  /** 文件仍在追加 = 该会话正在工作（运行时 IO 观测，不解析内容） */
+  private markIo(sessionId: string, meta: LineContext, cwd?: string): void {
+    if (Date.now() - meta.mtimeMs > 180_000) return
+    const bucket = Math.floor(Date.now() / 30_000)
+    if (this.ioBucket.get(meta.relPath) === bucket) return
+    this.ioBucket.set(meta.relPath, bucket)
+    this.emitState({
+      tool: this.id,
+      sessionId,
+      phase: 'active',
+      ts: Date.now(),
+      source: 'io',
+      workspace: cwd
+    })
+  }
+
   private handleLine(line: string, meta: LineContext): void {
     let obj: Record<string, unknown>
     try {
@@ -87,6 +105,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       sessionIdFromFile(meta.relPath) ||
       meta.relPath
 
+    this.markIo(sessionId, meta, cwd)
     const metaInfo = this.ensureSession(meta.relPath, sessionId, cwd, obj, message)
 
     const input = num(usage.input_tokens)

@@ -26,6 +26,8 @@ export class CodeBuddyAdapter extends BaseAdapter {
 
   private tailer: JsonlTailer | null = null
   private activityTimer: NodeJS.Timeout | null = null
+  /** 上一轮仍然活跃的对话 id，用于发结束信号 */
+  private activeSessions = new Set<string>()
   private readonly models = new Map<string, string>()
 
   async detect(): Promise<DetectResult> {
@@ -68,31 +70,79 @@ export class CodeBuddyAdapter extends BaseAdapter {
   }
 
   /**
-   * 以「扩展日志最近写入时间」判定 CodeBuddy 是否真的在工作：
-   * 日志位于 AppSupport/CodeBuddy CN/logs/<时间戳>/window<N>/exthost 下的 .log 文件，
-   * 每产生一次交互都会追加写入。
+   * CodeBuddy 桌面端没有 hook，但每个对话会在
+   * AppSupport/CodeBuddy CN/User/globalStorage/tencent-cloud.coding-copilot/edit-sessions/
+   * 下维护一个 <conversationId>.json，字段 updatedAt 只在真正产生编辑时刷新。
+   *
+   * 这是会话级的运行时文件，比「应用日志有没有写入」准确得多 ——
+   * 后者会把「IDE 开着」误判成「任务在跑」。
    */
   private async pollActivity(): Promise<void> {
     if (!this.ctx || this.ctx.isPaused()) return
-    const latest = await latestLogMtime()
-    if (!latest) return
+    const dir = join(
+      appSupportDir(),
+      'CodeBuddy CN',
+      'User',
+      'globalStorage',
+      'tencent-cloud.coding-copilot',
+      'edit-sessions'
+    )
+
+    let names: string[]
+    try {
+      names = await fsp.readdir(dir)
+    } catch {
+      return
+    }
 
     const now = Date.now()
-    const freshMs = Math.max(this.settings().idleThresholdMs, 90_000)
-    if (now - latest > freshMs) return
+    const freshMs = Math.max(this.settings().idleThresholdMs, 120_000)
+    const alive = new Set<string>()
 
-    // 活动段按「日期 + 项目」归并，一天一个任务，避免碎片化
-    const id = `cb-active-${dayKey(latest)}`
-    this.push({
-      tool: this.id,
-      externalSessionId: id,
-      ts: latest,
-      title: 'CodeBuddy · 桌面端',
-      tokensSource: 'unavailable',
-      skipEventLog: true,
-      dedupeKey: `cb-act:${id}:${Math.floor(latest / 30_000)}`,
-      ...emptyUsage()
-    })
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue
+      const file = join(dir, name)
+      let raw: string
+      try {
+        raw = await fsp.readFile(file, 'utf8')
+      } catch {
+        continue
+      }
+      let parsed: Record<string, unknown>
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      const updatedAt = typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0
+      const conversationId =
+        typeof parsed.conversationId === 'string' ? parsed.conversationId : name.replace(/.json$/, '')
+      if (!updatedAt || now - updatedAt > freshMs) continue
+
+      alive.add(conversationId)
+      this.emitState({
+        tool: this.id,
+        sessionId: `cb-${conversationId}`,
+        phase: 'active',
+        ts: updatedAt,
+        source: 'io',
+        title: 'CodeBuddy 会话',
+        startedAtHint: typeof parsed.createdAt === 'number' ? parsed.createdAt : undefined
+      })
+    }
+
+    // 之前活跃、现在不再更新 → 显式结束，避免一直挂着运行中
+    for (const id of this.activeSessions) {
+      if (alive.has(id)) continue
+      this.emitState({
+        tool: this.id,
+        sessionId: `cb-${id}`,
+        phase: 'end',
+        ts: now,
+        source: 'io'
+      })
+    }
+    this.activeSessions = alive
   }
 
   protected async onStop(): Promise<void> {

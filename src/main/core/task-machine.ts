@@ -2,6 +2,8 @@ import type {
   AppSettings,
   MonitorSummary,
   PricingRow,
+  StateSignal,
+  StateSource,
   TaskSnapshot,
   ToolId,
   UsageDelta
@@ -13,6 +15,16 @@ import { evaluateTask } from './alerts'
 const SEEN_LIMIT = 120_000
 /** 同一会话内两次事件间隔超过该阈值即视为新任务（连续活动段切分） */
 const BURST_GAP_MS = 10 * 60_000
+/** 状态来源的可信度：hook 最权威，process 最粗，none 表示没有运行时通道 */
+const STATE_WEIGHT: Record<StateSource, number> = {
+  hook: 5,
+  bridge: 4,
+  io: 3,
+  heartbeat: 2,
+  process: 1,
+  none: 0
+}
+
 const SOURCE_WEIGHT: Record<TaskSnapshot['tokensSource'], number> = {
   native: 3,
   bridge: 2,
@@ -108,7 +120,8 @@ export class TaskMachine {
         title: delta.title?.trim() || shortTitle(delta.externalSessionId),
         workspace: delta.workspace,
         model: delta.model,
-        status: 'running',
+        // 状态不由日志事件决定，等运行时状态信号；未收到前标记为未知来源
+        status: 'idle',
         // 心跳类数据源可给出真实的会话起始时间（早于首个事件）
         startedAt: Math.min(delta.startedAtHint ?? eventTs, eventTs, now),
         lastEventAt: eventTs,
@@ -123,6 +136,8 @@ export class TaskMachine {
         cacheHitRate: null,
         tokensSource: delta.tokensSource,
         eventCount: 0,
+        stateSource: 'none',
+        lastStateAt: null,
         alerts: []
       }
       this.tasks.set(taskId, task)
@@ -156,13 +171,98 @@ export class TaskMachine {
     }
 
     task.lastEventAt = Math.max(task.lastEventAt, eventTs)
-    // 历史回填（事件时间明显早于当前）不应把任务标为"运行中"
-    const historical = now - task.lastEventAt > this.settings.idleThresholdMs * 2
-    if (delta.endSignal || historical) {
-      // 历史回填的同一活动段可能持续收到事件，结束时间与时长必须随之延伸
+    // 历史回填的同一活动段可能持续收到事件，结束时间与时长必须随之延伸。
+    // 注意：这里只维护时间边界，**不再根据事件时间推断运行状态** ——
+    // 状态由 applyState() 接收的运行时信号决定。
+    const backfillEnded =
+      task.stateSource === 'none' && now - task.lastEventAt > this.settings.idleThresholdMs * 2
+    // 无任何运行时通道时（stateSource === 'none'）才回落到日志推断，
+    // 且该任务会被标记来源，界面上可区分「Hook 状态」与「日志推断」。
+    const logInferred = task.stateSource === 'none' && !backfillEnded && !delta.endSignal
+    if (delta.endSignal || backfillEnded) {
       task.endedAt = task.lastEventAt
       task.durationMs = Math.max(0, task.lastEventAt - task.startedAt)
       task.status = 'ended'
+    } else if (logInferred) {
+      task.status = 'running'
+      task.endedAt = undefined
+    }
+
+    this.recalculate(task, now)
+    this.dirty.add(taskId)
+    return { applied: true, taskId }
+  }
+
+  /**
+   * 应用运行时状态信号 —— 任务状态的唯一权威来源。
+   *
+   * 与 ingest() 的分工：
+   *  - ingest() 只负责 token / 费用 / 标题等「用量」信息
+   *  - applyState() 负责 running / idle / ended 的迁移
+   * 这样「状态」不再由日志里有没有新行推断出来。
+   */
+  applyState(signal: StateSignal): { applied: boolean; taskId: string } {
+    const baseId = buildTaskId(signal.tool, signal.sessionId)
+    const eventTs = signal.ts || Date.now()
+    const now = Date.now()
+
+    let taskId = this.latestByBase.get(baseId) ?? baseId
+    let task = this.tasks.get(taskId)
+
+    // 同一会话内的状态信号间隔过大，视为新一段工作
+    if (task) {
+      const anchor = task.lastStateAt ?? task.startedAt
+      if (eventTs - anchor > BURST_GAP_MS) {
+        task = undefined
+        taskId = `${baseId}~${eventTs}`
+      }
+    }
+
+    if (!task) {
+      task = {
+        id: taskId,
+        tool: signal.tool,
+        externalSessionId: signal.sessionId,
+        title: signal.title?.trim() || shortTitle(signal.sessionId),
+        workspace: signal.workspace,
+        model: signal.model,
+        status: signal.phase === 'end' ? 'ended' : 'running',
+        startedAt: Math.min(signal.startedAtHint ?? eventTs, eventTs, now),
+        lastEventAt: eventTs,
+        durationMs: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        reasoningTokens: 0,
+        costUsd: 0,
+        costKnown: false,
+        cacheHitRate: null,
+        tokensSource: 'unavailable',
+        eventCount: 0,
+        stateSource: signal.source,
+        lastStateAt: eventTs,
+        alerts: []
+      }
+      this.tasks.set(taskId, task)
+      this.latestByBase.set(baseId, taskId)
+    }
+
+    // 来源只允许「升级」：hook 信号一旦出现，不被进程探活降级
+    if (STATE_WEIGHT[signal.source] > STATE_WEIGHT[task.stateSource]) {
+      task.stateSource = signal.source
+    }
+
+    const incomingTitle = signal.title?.trim()
+    if (incomingTitle && (!task.title || task.title.trim().length <= 2)) {
+      task.title = incomingTitle
+    }
+    if (signal.workspace && !task.workspace) task.workspace = signal.workspace
+    if (signal.model) task.model = signal.model
+    task.lastStateAt = Math.max(task.lastStateAt ?? 0, eventTs)
+
+    if (signal.phase === 'end') {
+      this.endTask(task, eventTs)
     } else {
       task.status = 'running'
       task.endedAt = undefined
@@ -181,13 +281,29 @@ export class TaskMachine {
 
     for (const task of this.tasks.values()) {
       if (task.status === 'ended') continue
-      const sinceEvent = now - task.lastEventAt
+      // 状态 TTL 基于「最近一次运行时状态信号」，而不是日志事件时间。
+      // stateSource === 'none' 表示该工具没有任何运行时通道，此时不做运行态推断，
+      // 只把早已无信号的历史任务收尾，避免永久挂在进行中。
+      const anchor = task.lastStateAt ?? task.startedAt
+      const sinceState = now - anchor
 
-      if (task.status === 'running' && sinceEvent > idleMs) {
+      if (task.stateSource === 'none') {
+        // 没有任何运行时通道：只能按日志事件时间维持最粗的活性判断，
+        // 这类任务在界面上标记为「推断」状态。
+        const sinceEvent = now - task.lastEventAt
+        if (task.status === 'running' && sinceEvent > idleMs) {
+          task.status = 'idle'
+          changed += 1
+        } else if (task.status === 'idle' && sinceEvent > staleMs) {
+          this.endTask(task, task.lastEventAt)
+          changed += 1
+          continue
+        }
+      } else if (task.status === 'running' && sinceState > idleMs) {
         task.status = 'idle'
         changed += 1
-      } else if (task.status === 'idle' && sinceEvent > staleMs) {
-        this.endTask(task, task.lastEventAt)
+      } else if (task.status === 'idle' && sinceState > staleMs) {
+        this.endTask(task, anchor)
         changed += 1
         continue
       }

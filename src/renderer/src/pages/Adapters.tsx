@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Copy, FolderOpen, RefreshCw, ShieldCheck, Waves } from 'lucide-react'
 import type { AdapterInfo, BridgeStatus } from '@shared/types'
+import type { HookStatus } from '@shared/ipc-contract'
 import { TOOL_META } from '@shared/types'
 import { formatRelative } from '@shared/format'
 import { useMonitor } from '../store/monitor'
@@ -23,6 +24,8 @@ export function Adapters(): JSX.Element {
   const [bridge, setBridge] = useState<BridgeStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [rebuilding, setRebuilding] = useState(false)
+  const [hooks, setHooks] = useState<HookStatus | null>(null)
+  const [hookBusy, setHookBusy] = useState(false)
   const [rebuildDays, setRebuildDays] = useState(30)
 
   useEffect(() => {
@@ -30,6 +33,13 @@ export function Adapters(): JSX.Element {
       .getBridgeStatus()
       .then(setBridge)
       .catch((error: unknown) => console.error('[adapters] bridge status failed', error))
+  }, [])
+
+  useEffect(() => {
+    void window.monitor
+      .getHookStatus()
+      .then(setHooks)
+      .catch((error: unknown) => console.error('[adapters] hook status failed', error))
   }, [])
 
   useEffect(() => {
@@ -46,6 +56,22 @@ export function Adapters(): JSX.Element {
     setBridge(status)
     notify('已重新扫描全部数据源')
     setBusy(false)
+  }
+
+  const toggleHooks = async (install: boolean): Promise<void> => {
+    setHookBusy(true)
+    try {
+      const next = install
+        ? await window.monitor.installHooks()
+        : await window.monitor.removeHooks()
+      setHooks(next)
+      notify(install ? '已启用状态挂钩，工具下次启动后生效' : '已移除挂钩并还原配置', 'ok')
+    } catch (error) {
+      console.error('[adapters] hooks failed', error)
+      notify('挂钩操作失败，请查看主进程日志', 'warn')
+    } finally {
+      setHookBusy(false)
+    }
   }
 
   const rebuild = async (): Promise<void> => {
@@ -241,6 +267,39 @@ export function Adapters(): JSX.Element {
         </div>
       </Card>
 
+
+      <Card>
+        <SectionTitle
+          title="状态挂钩"
+          hint="用工具自身的 hook 上报运行状态，取代基于日志的推断"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <HookPill label="Claude Code" ok={hooks?.claude ?? false} note="回合开始 / 结束" />
+          <HookPill
+            label="Codex"
+            ok={hooks?.codex ?? false}
+            note={hooks?.codexChained ? "回合结束（已接管原 notify）" : "回合结束"}
+          />
+          <button
+            type="button"
+            disabled={hookBusy}
+            onClick={() => void toggleHooks(true)}
+            className="btn h-[28px]"
+          >
+            <ShieldCheck size={13} />
+            <span className="text-caption">{hookBusy ? '处理中…' : '启用挂钩'}</span>
+          </button>
+          <button type="button" disabled={hookBusy} onClick={() => void toggleHooks(false)} className="btn h-[28px]">
+            <span className="text-caption">移除挂钩</span>
+          </button>
+        </div>
+        <p className="mt-2 text-[10px] leading-relaxed text-fg-lo">
+          Claude Code 在 <code>~/.claude/settings.json</code> 注入 UserPromptSubmit / Stop / PreToolUse；
+          Codex 在 <code>~/.codex/config.toml</code> 接管 notify（原命令仍会被转调）。两者都会先备份原配置，
+          移除挂钩时还原。未启用挂钩的工具仍使用心跳 / 进程探活，这类状态在任务详情里标记为「推断」。
+        </p>
+      </Card>
+
       <Card>
         <SectionTitle
           title="数据维护"
@@ -281,5 +340,16 @@ export function Adapters(): JSX.Element {
         </p>
       </Card>
     </div>
+  )
+}
+
+/** 挂钩启用状态标签 */
+function HookPill({ label, ok, note }: { label: string; ok: boolean; note: string }): JSX.Element {
+  return (
+    <span className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1">
+      <span className={cn('h-1.5 w-1.5 rounded-full', ok ? 'bg-state-ok' : 'bg-white/20')} />
+      <span className="text-caption text-fg-mid">{label}</span>
+      <span className="text-[10px] text-fg-lo">{ok ? note : '未启用'}</span>
+    </span>
   )
 }

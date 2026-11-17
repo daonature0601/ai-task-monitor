@@ -36,6 +36,8 @@ async function bootstrap(): Promise<void> {
 
   runtime = createRuntime(db, {
     bridgeTokenFile: join(appConfigDir(userData), 'bridge-token'),
+    hooksDir: join(appConfigDir(userData), 'hooks'),
+    stateDir: join(appConfigDir(userData), 'state'),
     hooks: {
       onSnapshot: (snapshot) => {
         notifyRenderer(snapshot)

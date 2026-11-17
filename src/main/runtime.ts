@@ -28,6 +28,7 @@ import { listEventsForTask } from './db/repositories/usage'
 import { recomputeEventCosts } from './db/repositories/event-cost'
 import { buildStats, summaryFor } from './db/repositories/stats'
 import { TaskMachine } from './core/task-machine'
+import { StateInbox } from './collectors/state-inbox'
 import { BatchWriter } from './core/batch-writer'
 import { AdapterManager } from './core/adapter-manager'
 import { BridgeServer } from './bridge/server'
@@ -60,6 +61,7 @@ export interface Runtime {
   getTaskDetail: (id: string) => TaskDetail | null
   getStats: (from: number, to: number) => StatsPayload
   bridgeStatus: () => BridgeStatus
+  stateInbox: { start: () => Promise<void>; stop: () => Promise<void> }
   /**
    * 重建历史索引：清空派生的任务/流水表与读取游标，按指定天数重新扫描日志。
    * 用于恢复因回填窗口过小而未导入的历史数据。
@@ -74,7 +76,14 @@ export interface Runtime {
  */
 export function createRuntime(
   db: Database.Database,
-  options: { bridgeTokenFile: string; hooks: RuntimeHooks }
+  options: {
+    bridgeTokenFile: string
+    /** 钩子脚本目录 */
+    hooksDir: string
+    /** 状态收件箱目录 */
+    stateDir: string
+    hooks: RuntimeHooks
+  }
 ): Runtime {
   let settings = readSettings(db)
   let pricing = listPricing(db)
@@ -126,7 +135,25 @@ export function createRuntime(
       // 心跳类事件只用于维持活跃度，不写入用量流水（否则每 30s 一行纯噪声）
       if (delta.skipEventLog) return
       writer.enqueue(result.taskId, delta, machine.getTask(result.taskId)?.model)
+    },
+    emitState: (signal) => {
+      // 状态只由运行时信号驱动：写库 + 立即推送，避免界面滞后
+      machine.applyState(signal)
+      publish()
     }
+  })
+
+  // 运行时状态收件箱：hook / 心跳 / 进程 / 桥接把状态写进 inbox.jsonl，
+  // 这里按字节游标增量读取，状态直接应用到状态机，不经过任何日志推断。
+  const stateInbox = new StateInbox({
+    dir: options.stateDir,
+    cursors,
+    onSignal: (signal) => {
+      const result = machine.applyState(signal)
+      if (!result.applied) return
+      publish(true)
+    },
+    onError: (error) => console.error('[state] inbox failed', error)
   })
 
   const bridge = new BridgeServer({
@@ -247,11 +274,16 @@ export function createRuntime(
     },
     getStats: (from, to) => buildStats(db, from, to),
     bridgeStatus: () => bridge.status(),
+    stateInbox: {
+      start: () => stateInbox.start(),
+      stop: () => stateInbox.stop()
+    },
 
     rebuildHistory: async (days) => {
       const window = Math.min(Math.max(Math.round(days) || 7, 1), 365)
       console.log(`[rebuild] 开始重建，回填窗口 ${window} 天`)
       scheduler.stop()
+      await stateInbox.stop()
       await adapters.stopAll()
       // 任务与流水都是日志的派生数据，可以安全重建；
       // 设置与价目表属于用户配置，不动。
@@ -280,6 +312,7 @@ export function createRuntime(
 
 export async function startRuntime(runtime: Runtime): Promise<void> {
   await runtime.adapters.startAll()
+  await runtime.stateInbox.start()
   await runtime.bridge.start()
   runtime.scheduler.start()
   runtime.publish()
