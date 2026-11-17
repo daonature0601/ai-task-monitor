@@ -59,12 +59,12 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 
 | 工具 | 数据源 | 通道 | Token 完整度 |
 | --- | --- | --- | --- |
-| Codex | `~/.codex/sessions/{Y}/{M}/{D}/rollout-*.jsonl` | JSONL 增量 tail，读 `token_count.info.last_token_usage` | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
-| Claude Code | `~/.claude/projects/<slug>/<uuid>.jsonl` | JSONL 增量 tail，逐行累加 `message.usage` | 完整：输入 / 输出 / `cache_read` / `cache_creation` |
-| WorkBuddy | `~/.workbuddy/projects/**/*.jsonl`（`providerData.rawUsage`） | JSONL 增量 tail；子代理 `subagents/agent-*.jsonl` 按路径归属父会话 | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
-| CodeBuddy | IDE：`CodeBuddyExtension/Data/**/history/<ws>/<convId>/index.json`；CLI：`~/.codebuddy/projects/*.jsonl` | 索引轮询（mtime + 最大时间戳游标）与 JSONL tail 并行；状态走 `edit-sessions` | IDE 为请求级真实用量（**不含模型名，费用 `—`**）；CLI 原生 |
+| Codex | `~/.codex/sessions/{Y}/{M}/{D}/rollout-*.jsonl` | JSONL 增量 tail，读 `token_count.info.last_token_usage`；`task_started` / `task_complete` 定本轮边界；模型取自 `model`（`model_provider` 不算） | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
+| Claude Code | `~/.claude/projects/<slug>/<uuid>.jsonl` | JSONL 增量 tail，逐行累加 `message.usage`；`type=user` 定本轮起点、`summary` 行取会话名 | 完整：输入 / 输出 / `cache_read` / `cache_creation` |
+| WorkBuddy | `~/.workbuddy/projects/**/*.jsonl`（`providerData.rawUsage`） | JSONL 增量 tail；`ai-title` 取任务名、user/assistant 消息划轮次、`keepSession` 一次对话一个任务；子代理按路径归属父会话 | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
+| CodeBuddy | IDE：`CodeBuddyExtension/Data/**/history/<ws>/<convId>/index.json`；CLI：`~/.codebuddy/projects/*.jsonl` | 索引轮询（mtime + 最大时间戳游标 + 跨副本指纹去重）与 JSONL tail 并行；每条请求即一轮、一次对话一个任务；状态走 `edit-sessions` | IDE 为请求级真实用量（**不含模型名，费用 `—`**）；CLI 原生 |
 | Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | 只读 SQLite（`ItemTable`） | 多数情况下不可得（服务端持有） |
-| DeepSeek Harness | `~/.dsh/sessions/<项目>/<会话>/session.v4.jsonl.zstd` | zstd 多帧解压（`fzstd`）+ 按 `seq` 增量去重 | 完整：输入 / 输出 / 缓存读 / 缓存写 |
+| DeepSeek Harness | `~/.dsh/sessions/<项目>/<会话>/session.v4.jsonl.zstd` | zstd 多帧解压（`fzstd`）+ 按 `seq` 增量去重；`turn/start|end` 定轮次、`session/title` 取任务名、`request/header.config.model` 取模型 | 完整：输入 / 输出 / 缓存读 / 缓存写 |
 | 元宝 | 无本地会话落盘（实测仅 `.qimei/`、`Documents/`） | 本地 HTTP 桥接 + 用户脚本 | 桥接可用；否则仅记录会话时长 |
 
 ### 数据可信度约定
@@ -84,8 +84,8 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 
 | 字段 | 定义 | 展示 |
 | --- | --- | --- |
-| 开始时间 | 当前活动段首个事件的时间戳 | `今天 20:12` / `昨天 18:40` / `11-03 22:23` |
-| 执行时长 | 活动段内 `最后事件 - 首个事件`；运行中为 `当前时间 - 开始时间` | `1h 23m 45s`，不足 1 分钟显示 `45s` |
+| 本轮开始 | 当前这一轮问答的起点（用户提问时刻，见 3.2） | `今天 20:12` / `昨天 18:40` / `11-03 22:23` |
+| 本轮耗时 | `本轮结束 - 本轮开始`；运行中按当前时间推进，静默 / 已结束冻结在最后活动时刻 | `1h 23m 45s`，不足 1 分钟显示 `45s` |
 | 输入 Token | 非缓存命中的新输入 token | `12.4K`（≥1000）/ `1.23M`（≥100 万），悬停显示完整值 |
 | 输出 Token | 模型生成 token | 同上 |
 | 输入缓存命中率 | `cacheRead / (input + cacheRead + cacheWrite)`，分母为 0 时为空 | `87.3%`，无数据 `—` |
@@ -93,7 +93,15 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 | 当前费用 | 四类 token × 模型单价累加，库里恒为 USD | ≥1 保留 2 位，<1 保留 4 位，符号前置 |
 | 状态 | `running` / `idle` / `ended` | 运行中 / 静默 / 已结束（详见下节） |
 
-**任务 = 会话内的一段连续活动（burst）。** 同一会话两次事件间隔超过 10 分钟即切分为新任务，避免跨天会话产生数百小时的荒谬时长。
+**任务粒度优先按「会话」聚合，其次才是活动段。**
+
+- **一次对话一个任务**（CodeBuddy / WorkBuddy / DeepSeek Harness）：数据源自带会话 id，标 `keepSession`，
+  跨天、跨长时间停顿都不拆
+- **每轮一个任务**（Codex / Claude Code）：用工具自身的回合事件（`task_started` / `task_complete`、
+  `type=user` → `Stop`）切分
+- 只有**没有会话边界**的数据源才按 10 分钟空档切分（`~时间戳` 新任务）
+
+状态信号（hook / IO / 心跳）同样遵守 `keepSession`：任务未结束时不会被另起一个分身。
 
 ### 任务状态语义（互斥，不重叠）
 
@@ -114,8 +122,8 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 
 | 情形 | 判据 | 归属 |
 | --- | --- | --- |
-| 正常续写 | `0 ≤ eventTs - lastEventAt ≤ 10min` | 追加到当前活动段 |
-| 开新活动段 | `eventTs - lastEventAt > 10min` | 新任务 `${baseId}~${eventTs}` |
+| 正常续写 | 同一会话内（`keepSession` 时不看空档） | 追加到当前任务 |
+| 开新活动段 | `eventTs - lastEventAt > 10min` 且该工具无会话边界 | 新任务 `${baseId}~${eventTs}` |
 | **历史回填** | `eventTs < startedAt - 10min` | 独立的按天任务 `${baseId}~h<YYYY-MM-DD>`，状态直接结算为 `ended` |
 | 心跳 | `skipEventLog: true` | 只刷新活跃度，**不写流水、不改 tokensSource** |
 
@@ -164,7 +172,7 @@ TaskMachine.applyState()  →  状态 + state_source 落库
 | `hook` | 5 | 工具钩子主动上报 | Claude Code UserPromptSubmit / Stop |
 | `bridge` | 4 | 网页脚本显式上报 | 元宝、DeepSeek Harness |
 | `io` | 3 | 会话文件此刻仍在追加 | Codex / Claude Code 回合进行中 |
-| `heartbeat` | 2 | `<pid>.json` 心跳 | CodeBuddy / WorkBuddy |
+| `heartbeat` | 2 | `<pid>.json` 心跳（只维持已有任务，不建任务） | 已启用 hook / JSONL 状态后不再使用 |
 | `process` | 1 | 进程存在 | Cursor 等无钩子工具 |
 | `none` | 0 | 没有任何运行时通道 | 仅作兜底，界面标记为「推断」 |
 
@@ -193,12 +201,20 @@ TaskMachine.applyState()  →  状态 + state_source 落库
 
 - **已核实 `verified`** —— 单价取自厂商官方定价页，行内可直接跳转来源：
   - Anthropic `claude-*`：<https://platform.claude.com/docs/en/about-claude/pricing>
-  - OpenAI `gpt-6*`：<https://platform.openai.com/docs/pricing>
-  - DeepSeek `deepseek-*`：<https://api-docs.deepseek.com/quick_start/pricing>（取**低谷价**，高峰为 2 倍，已在备注标注）
-- **待确认 `pending`** —— 官方 API 定价页未列出，单价强制为 0，任务费用显示 `—`：
-  - `codex-*`：Codex 走 ChatGPT 订阅额度，API 页无 token 单价
-  - `hy*`（腾讯）、`glm-*`（智谱）：未找到官方公开单价
+  - OpenAI `gpt-6*` / `gpt-5*` / `gpt-5.3-codex`：<https://platform.openai.com/docs/pricing>
+  - DeepSeek `deepseek-*`：<https://api-docs.deepseek.com/quick_start/pricing>
+  - 腾讯混元 `hy3/hy4*`：<https://cloud.tencent.com/document/api/266/130055>
+  - 智谱 `glm-*`：<https://docs.bigmodel.cn/cn/guide/start/pricing>
+- **待确认 `pending`** —— 官方价目表未列出，单价强制为 0，任务费用显示 `—`：
+  - `codex-auto-review`：Codex 内部审查线程，无公开单价（也不应建成任务）
+  - `hy4-free*`：WorkBuddy 免费档位，官方无单价
   - `*` 兜底行：未匹配任何已核实模型
+
+**报价币种**：`currency` 字段记录厂商发布价的原币种（国外 USD、国内 CNY），计价时统一折算成
+USD 存储，界面再按设置的展示币种换算。**分时计价**：DeepSeek 的 `peak` 字段记录高峰价，
+高峰时段为 UTC 01-04、06-10（周一至周五），事件按各自发生时刻取价。
+
+**模型名归一**：`-ioa` 后缀属于内部转换标记，按前缀计价（`glm-5.3-ioa` → `glm-5.3`）。
 
 要启用某个待确认模型，只需在设置页填入单价并把状态切为「已核实」，任务费用会立即按新口径重算。
 
@@ -241,8 +257,9 @@ TaskMachine.applyState()  →  状态 + state_source 落库
 
 ```
 adapters（7 个采集器）
-   └── collectors（jsonl-tailer / sqlite-reader / leveldb-reader / process-probe）
-          └── core（task-machine → pricing → alerts → scheduler → snapshot）
+   └── collectors（jsonl-tailer / state-inbox / codebuddy-ide / dsh-session-reader /
+                   sqlite-reader / leveldb-reader / process-probe）
+          └── core（task-machine → pricing → alerts → scheduler → snapshot → batch-writer）
                  └── db（better-sqlite3 WAL：tasks / usage_events / file_cursors / settings / pricing）
                         └── ipc → renderer + 菜单栏
 ```
@@ -260,15 +277,17 @@ adapters（7 个采集器）
 ## 8. 已知限制
 
 1. **元宝** 本地无任何会话/用量落盘，不装脚本时只能记录「进程存活 + 会话时长」，token 全为 `—`。
-2. **DeepSeek Harness** 的 Local Storage 只有界面状态（draft / 侧边栏），会话与用量在 `~/.dsh/sessions` 的 zstd 文件里；旧版本误读 LevelDB 期间的历史无法回补。
+2. **DeepSeek Harness** 的会话与用量在 `~/.dsh/sessions` 的 zstd 文件里（Local Storage 只有界面状态）；历史会话可完整回补，但文件是整块压缩，每次只能整份重解。
 3. **Cursor** 的 token 用量由服务端持有，本地通常只有会话时间线，费用显示 `—`。
 4. **CodeBuddy IDE 无模型名**：`index.json` 只有用量没有模型（`state.vscdb` 里是加密值），因此 token 准确但费用恒为 `—`。
-5. **回填窗口固定 7 天**（按文件 mtime 过滤）：更早的事件不会自动导入；清空 `file_cursors` 重扫也不会超过该窗口。若需要更早的历史，只能调大适配器里的 `backfillDays` 后重扫。
+5. **回填窗口由设置项 `backfillDays` 控制**（默认 7 天，按文件 mtime 过滤）：更早的事件不会自动导入；调大该值并清空 `file_cursors` 重扫可回补更早的历史。
 6. **未知/待确认模型不计价**：费用列显示 `—`，需在设置页补录单价并标记「已核实」后才会计算。
-7. **Codex 无 API token 单价**：任务时长与 token 完整，但费用为 `—`，除非手动补录订阅折算价。
-8. **心跳不再建任务**：`<pid>.json` 是进程存活信号（WorkBuddy 的 prewarm 池会一次生成多个），现在只维持已有任务的状态，不再产生空卡片。
+7. **Codex 现已按官方价计价**（`gpt-5.3-codex`、`gpt-6.x` 等）；只有 `codex-auto-review` 这类内部线程无公开单价，费用显示 `—`。
+8. **心跳与元信息都不建任务**：`<pid>.json` 只是进程存活信号（WorkBuddy 的 prewarm 池会一次生成多个），
+   只有标题、没有 token 的元信息同理；两者都只更新已有任务。缺模型时显示「模型未知」，
+   不会把 `openai` 这类 provider 名当成模型。
 9. **CodeBuddy 纯聊天任务无法判定运行中**：桌面端没有 hook，会话级信号只有 `edit-sessions/<conversationId>.json` 的 `updatedAt`，它仅在产生文件编辑时刷新；只问答不改文件的任务拿不到运行态。
-10. **Codex 没有「开始」事件**：官方 `notify` 只提供回合结束（且常被其它工具占用）。因此开始依赖 `io`（文件写入），结束可精确到 hook。
+10. **Codex 的「开始」来自 rollout 而非 hook**：官方 `notify` 只提供回合结束（且常被其它工具占用），本轮起点取自 `task_started` 事件；装挂钩后结束信号更精确。
 11. **Cursor 只有进程级状态**：无 hook、无心跳，只能判断应用是否打开，无法区分「开着但在看代码」与「正在跑任务」。
 
 ---
