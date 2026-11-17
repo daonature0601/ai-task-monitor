@@ -51,6 +51,7 @@ export function registerIpcHandlers(runtime: Runtime): void {
     const header = [
       '任务',
       '工具',
+      '项目',
       '本轮开始',
       '本轮耗时(秒)',
       '会话开始',
@@ -69,6 +70,7 @@ export function registerIpcHandlers(runtime: Runtime): void {
       [
         task.title,
         task.tool,
+        task.project ?? '',
         formatTimeFull(task.turnStartedAt ?? task.startedAt),
         Math.round(turnElapsed(task) / 1000),
         formatTimeFull(task.startedAt),

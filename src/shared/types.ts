@@ -56,6 +56,8 @@ export interface UsageDelta extends TokenUsage {
   ts: number
   title?: string
   workspace?: string
+  /** 会话所属项目名（取自工作目录名或工具元信息） */
+  project?: string
   model?: string
   tokensSource: TokensSource
   /** 幂等键：`${adapterId}:${fileRelPath}:${byteOffset}` 或 `msg:${messageId}` */
@@ -80,6 +82,8 @@ export interface TaskSnapshot extends TokenUsage {
   externalSessionId: string
   title: string
   workspace?: string
+  /** 会话所属项目名 */
+  project?: string
   model?: string
   status: TaskStatus
   startedAt: number
@@ -199,6 +203,8 @@ export interface StateSignal {
   source: StateSource
   title?: string
   workspace?: string
+  /** 会话所属项目名 */
+  project?: string
   model?: string
   /** 会话真实开始时间，hook / 心跳可提供 */
   startedAtHint?: number

@@ -33,6 +33,8 @@ export class ClaudeCodeAdapter extends BaseAdapter {
 
   /** relPath → 上次 io 心跳的 30s 桶 */
   private readonly ioBucket = new Map<string, number>()
+  /** 会话展示名（来自 summary 行）；缺省回退到工作目录名 */
+  private readonly titles = new Map<string, string>()
   private tailer: JsonlTailer | null = null
   private readonly sessions = new Map<string, ClaudeSessionMeta>()
 
@@ -85,6 +87,19 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     })
   }
 
+  /** 会话展示名：summary 行优先，其次工作目录名；同时给出所属项目名 */
+  private titleFor(sessionId: string, cwd?: string): string | undefined {
+    const fromSummary = this.titles.get(sessionId)
+    if (fromSummary) return fromSummary
+    return cwd ? basename(cwd) : undefined
+  }
+
+  private projectFor(cwd?: string): string | undefined {
+    if (!cwd) return undefined
+    const seg = cwd.split('/').filter(Boolean).pop()
+    return seg || undefined
+  }
+
   private handleLine(line: string, meta: LineContext): void {
     let obj: Record<string, unknown>
     try {
@@ -111,7 +126,9 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         tool: this.id,
         externalSessionId: sid,
         ts,
-        title: typeof obj.cwd === 'string' ? basename(obj.cwd) : undefined,
+        title: this.titleFor(sid, typeof obj.cwd === 'string' ? obj.cwd : undefined),
+        project: this.projectFor(typeof obj.cwd === 'string' ? obj.cwd : undefined),
+        authoritativeTitle: true,
         workspace: typeof obj.cwd === 'string' ? obj.cwd : undefined,
         tokensSource: 'unavailable',
         skipEventLog: true,
@@ -119,6 +136,30 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         dedupeKey: `turn:${obj.uuid ?? sid}:${ts}`,
         ...emptyUsage()
       })
+      return
+    }
+
+    // Claude Code 会写入 type=summary 的行，内容即该会话的展示名
+    if (obj.type === 'summary' && typeof obj.summary === 'string' && obj.summary.trim()) {
+      const sid =
+        (typeof obj.sessionId === 'string' && obj.sessionId) ||
+        sessionIdFromFile(meta.relPath) ||
+        meta.relPath
+      const title = obj.summary.trim()
+      if (this.titles.get(sid) !== title) {
+        this.titles.set(sid, title)
+        this.push({
+          tool: this.id,
+          externalSessionId: sid,
+          ts: Date.now(),
+          title,
+          authoritativeTitle: true,
+          tokensSource: 'unavailable',
+          skipEventLog: true,
+          dedupeKey: `title:${sid}:${title}`,
+          ...emptyUsage()
+        })
+      }
       return
     }
 
@@ -155,7 +196,9 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       tool: this.id,
       externalSessionId: sessionId,
       ts: parseTs(obj.timestamp) ?? Date.now(),
-      title: cwd ? basename(cwd) : undefined,
+      title: this.titleFor(sessionId, cwd),
+      project: this.projectFor(cwd),
+      authoritativeTitle: true,
       workspace: cwd,
       model: typeof message.model === 'string' ? message.model : metaInfo.model,
       inputTokens: input,
@@ -191,8 +234,10 @@ export class ClaudeCodeAdapter extends BaseAdapter {
         tool: this.id,
         externalSessionId: sessionId,
         ts: meta.startedAt,
-        title: cwd ? basename(cwd) : undefined,
+        title: this.titleFor(sessionId, cwd),
         workspace: cwd,
+        project: this.projectFor(cwd),
+        authoritativeTitle: true,
         model: meta.model,
         tokensSource: 'native',
         dedupeKey: `meta:${relPath}`,

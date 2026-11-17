@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type Database from 'better-sqlite3'
 import type {
   AppSettings,
@@ -90,6 +93,53 @@ export function createRuntime(
   let lastSnapshot: SnapshotPayload | null = null
 
   markStaleTasksEnded(db)
+
+  // 历史任务补「项目名」：旧版本没有这一列，按工作目录末段回填一次
+  const needProject = db
+    .prepare('SELECT id, workspace FROM tasks WHERE project IS NULL AND workspace IS NOT NULL')
+    .all() as Array<{ id: string; workspace: string }>
+  if (needProject.length > 0) {
+    const update = db.prepare('UPDATE tasks SET project = ? WHERE id = ?')
+    const apply = db.transaction((rows: Array<{ id: string; workspace: string }>) => {
+      for (const row of rows) {
+        const seg = row.workspace.split('/').filter(Boolean).pop()
+        if (seg) update.run(seg, row.id)
+      }
+    })
+    apply(needProject)
+    console.log(`[db] backfilled project for ${needProject.length} tasks`)
+  }
+
+  // 历史 Codex 任务改名：旧版本用的是工作目录名，这里按 session_index.jsonl
+  // 的 thread_name 对齐到 Codex 侧边栏显示的会话名。
+  try {
+    const indexPath = join(homedir(), '.codex', 'session_index.jsonl')
+    if (existsSync(indexPath)) {
+      const titles = new Map<string, string>()
+      for (const line of readFileSync(indexPath, 'utf8').split('\n')) {
+        const text = line.trim()
+        if (!text) continue
+        const obj = JSON.parse(text) as { id?: string; thread_name?: string }
+        if (obj.id && obj.thread_name) titles.set(obj.id, obj.thread_name)
+      }
+      const rows = db
+        .prepare("SELECT id, external_session_id, title FROM tasks WHERE tool = 'codex'")
+        .all() as Array<{ id: string; external_session_id: string; title: string }>
+      const update = db.prepare('UPDATE tasks SET title = ? WHERE id = ?')
+      let renamed = 0
+      db.transaction(() => {
+        for (const row of rows) {
+          const name = titles.get(row.external_session_id)
+          if (!name || name === row.title) continue
+          update.run(name, row.id)
+          renamed += 1
+        }
+      })()
+      if (renamed > 0) console.log(`[db] aligned ${renamed} codex task titles with session_index`)
+    }
+  } catch (error) {
+    console.error('[runtime] align codex titles failed', error)
+  }
 
   const machine = new TaskMachine({ settings: () => settings, pricing: () => pricing })
   machine.hydrate(listRecentTasks(db, 800))

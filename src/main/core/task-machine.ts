@@ -157,6 +157,7 @@ export class TaskMachine {
       task.title = incomingTitle
     }
     if (delta.workspace && !task.workspace) task.workspace = delta.workspace
+    if (delta.project && task.project !== delta.project) task.project = delta.project
     if (delta.model) task.model = delta.model
 
     task.inputTokens += positive(delta.inputTokens)
@@ -269,6 +270,7 @@ export class TaskMachine {
       task.title = incomingTitle
     }
     if (signal.workspace && !task.workspace) task.workspace = signal.workspace
+    if (signal.project && !task.project) task.project = signal.project
     if (signal.model) task.model = signal.model
     const previousStateAt = task.lastStateAt ?? 0
     task.lastStateAt = Math.max(previousStateAt, eventTs)

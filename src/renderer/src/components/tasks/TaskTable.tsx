@@ -77,7 +77,7 @@ export function TaskTable({
                     <div className="min-w-0">
                       <p className="truncate text-fg-hi">{task.title}</p>
                       <p className="truncate text-caption text-fg-lo">
-                        {task.model ?? (task.workspace?.split('/').pop() || '—')}
+                        {[task.project, task.model].filter(Boolean).join(' · ') || '—'}
                       </p>
                     </div>
                   </div>

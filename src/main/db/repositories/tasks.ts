@@ -25,6 +25,7 @@ export interface TaskRow {
   state_source: string
   last_state_at: number | null
   turn_started_at: number | null
+  project: string | null
   turn_ended_at: number | null
   tokens_source: string
   event_count: number
@@ -59,6 +60,7 @@ export function rowToSnapshot(row: TaskRow): TaskSnapshot {
     stateSource: (row.state_source as TaskSnapshot['stateSource']) ?? 'none',
     lastStateAt: row.last_state_at ?? null,
     turnStartedAt: row.turn_started_at ?? row.started_at,
+    project: row.project ?? undefined,
     turnEndedAt: row.turn_ended_at ?? undefined,
     cacheHitRate,
     tokensSource: (row.tokens_source as TaskSnapshot['tokensSource']) || 'unavailable',
@@ -72,12 +74,12 @@ INSERT INTO tasks (
   id, tool, external_session_id, title, workspace, model, status,
   started_at, last_event_at, ended_at, duration_ms,
   input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
-  cost_usd, cost_known, state_source, last_state_at, turn_started_at, turn_ended_at, tokens_source, event_count, updated_at
+  cost_usd, cost_known, state_source, last_state_at, turn_started_at, turn_ended_at, project, tokens_source, event_count, updated_at
 ) VALUES (
   @id, @tool, @externalSessionId, @title, @workspace, @model, @status,
   @startedAt, @lastEventAt, @endedAt, @durationMs,
   @inputTokens, @outputTokens, @cacheReadTokens, @cacheWriteTokens, @reasoningTokens,
-  @costUsd, @costKnown, @stateSource, @lastStateAt, @turnStartedAt, @turnEndedAt, @tokensSource, @eventCount, @updatedAt
+  @costUsd, @costKnown, @stateSource, @lastStateAt, @turnStartedAt, @turnEndedAt, @project, @tokensSource, @eventCount, @updatedAt
 )
 ON CONFLICT(id) DO UPDATE SET
   title = COALESCE(excluded.title, tasks.title),
@@ -98,6 +100,7 @@ ON CONFLICT(id) DO UPDATE SET
   last_state_at = excluded.last_state_at,
   turn_started_at = excluded.turn_started_at,
   turn_ended_at = excluded.turn_ended_at,
+  project = COALESCE(excluded.project, tasks.project),
   tokens_source = CASE
     WHEN excluded.tokens_source = 'native' OR excluded.tokens_source = 'bridge' THEN excluded.tokens_source
     WHEN tasks.tokens_source IN ('native', 'bridge') THEN tasks.tokens_source
@@ -132,6 +135,7 @@ function toParams(task: TaskSnapshot): Record<string, unknown> {
     lastStateAt: task.lastStateAt ?? null,
     turnStartedAt: task.turnStartedAt,
     turnEndedAt: task.turnEndedAt ?? null,
+    project: task.project ?? null,
     tokensSource: task.tokensSource,
     eventCount: task.eventCount,
     updatedAt: Date.now()
@@ -194,7 +198,7 @@ export function queryTasks(
     params.to = query.to
   }
   if (query.keyword && query.keyword.trim()) {
-    where.push('(title LIKE @kw OR workspace LIKE @kw OR model LIKE @kw OR external_session_id LIKE @kw)')
+    where.push('(title LIKE @kw OR project LIKE @kw OR workspace LIKE @kw OR model LIKE @kw OR external_session_id LIKE @kw)')
     params.kw = `%${query.keyword.trim()}%`
   }
 

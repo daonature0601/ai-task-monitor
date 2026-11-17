@@ -141,6 +141,19 @@ ALTER TABLE tasks ADD COLUMN turn_ended_at INTEGER;
 UPDATE tasks SET turn_started_at = started_at WHERE turn_started_at IS NULL;
 `)
     }
+  },
+  {
+    /**
+     * v5：任务名改为「会话展示名」，并单独记录所属项目。
+     * 旧数据的 title 多为工作目录名，project 从 workspace 末段补齐。
+     */
+    version: 5,
+    name: 'task-project',
+    up: (db) => {
+      db.exec(`
+ALTER TABLE tasks ADD COLUMN project TEXT;
+`)
+    }
   }
 ]
 

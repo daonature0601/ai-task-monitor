@@ -136,6 +136,11 @@ export function TaskDetailDrawer(): JSX.Element | null {
           ) : task ? (
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-2">
+                <Metric
+                  label="项目"
+                  value={task.project ?? '—'}
+                  hint={task.workspace ?? undefined}
+                />
                 <Metric label="本轮开始" value={formatTimeFull(task.turnStartedAt ?? task.startedAt)} mono />
                 <Metric
                   label="本轮耗时"

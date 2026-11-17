@@ -127,6 +127,7 @@ export class CodeBuddyAdapter extends BaseAdapter {
         ts: updatedAt,
         source: 'io',
         title: 'CodeBuddy 会话',
+        project: 'CodeBuddy',
         startedAtHint: typeof parsed.createdAt === 'number' ? parsed.createdAt : undefined
       })
     }

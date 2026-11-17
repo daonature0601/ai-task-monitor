@@ -1,4 +1,5 @@
 import { promises as fsp, closeSync, openSync, readSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, join, relative } from 'node:path'
 import type { AdapterCapabilities, ToolId } from '@shared/types'
 import type { AdapterContext } from '../base'
@@ -40,6 +41,10 @@ export class CodexAdapter extends BaseAdapter {
   private tailer: JsonlTailer | null = null
   /** relPath → 上次 io 心跳的 30s 桶，避免每次追加都发信号 */
   private readonly ioBucket = new Map<string, number>()
+  /** session_index.jsonl 的线程展示名：id → thread_name */
+  private readonly threadTitles = new Map<string, string>()
+  private titleTimer: NodeJS.Timeout | null = null
+  private lastIndexMtime = 0
   private readonly sessions = new Map<string, SessionMeta>()
   private readonly totals = new Map<string, CodexTotals>()
   /** guardian_review 线程：内部审查，不计入任务 */
@@ -71,6 +76,12 @@ export class CodexAdapter extends BaseAdapter {
       onLine: (line, meta) => this.handleLine(line, meta),
       onError: (error) => this.fail(error)
     })
+    // 先加载线程展示名，保证第一条事件就带正确的任务名
+    await this.loadThreadTitles()
+    this.titleTimer = setInterval(() => {
+      void this.loadThreadTitles().catch(() => undefined)
+    }, 15_000)
+
     await this.tailer.start()
     void this.primeMeta(root)
     console.log('[adapter:codex] started')
@@ -148,6 +159,83 @@ export class CodexAdapter extends BaseAdapter {
   protected async onStop(): Promise<void> {
     await this.tailer?.stop()
     this.tailer = null
+    if (this.titleTimer) clearInterval(this.titleTimer)
+    this.titleTimer = null
+  }
+
+  /** 会话展示名：优先 Codex 侧边栏的 thread_name，回退到工作目录名 */
+  private titleFor(session: SessionMeta): string | undefined {
+    const fromIndex = this.threadTitles.get(session.sessionId)
+    if (fromIndex && fromIndex.trim()) return fromIndex.trim()
+    return session.cwd ? basename(session.cwd) : undefined
+  }
+
+  /** 所属项目名：取工作目录末段（Codex 侧边栏按项目分组的就是它） */
+  private projectFor(session: SessionMeta): string | undefined {
+    if (!session.cwd) return undefined
+    const seg = session.cwd.split('/').filter(Boolean).pop()
+    return seg || undefined
+  }
+
+  /**
+   * 读取 ~/.codex/session_index.jsonl（id → thread_name），
+   * 这是 Codex 桌面端侧边栏里显示的会话名，也是任务名的权威来源。
+   * 文件不大但会持续追加，按 mtime 变化重载即可。
+   */
+  private async loadThreadTitles(): Promise<void> {
+    const file = join(homedir(), '.codex', 'session_index.jsonl')
+    let stat
+    try {
+      stat = await fsp.stat(file)
+    } catch {
+      return
+    }
+    if (this.lastIndexMtime === stat.mtimeMs) return
+    this.lastIndexMtime = stat.mtimeMs
+
+    let raw: string
+    try {
+      raw = await fsp.readFile(file, 'utf8')
+    } catch {
+      return
+    }
+    const changed: string[] = []
+    for (const line of raw.split('\n')) {
+      const text = line.trim()
+      if (!text) continue
+      let obj: Record<string, unknown>
+      try {
+        obj = JSON.parse(text) as Record<string, unknown>
+      } catch {
+        continue
+      }
+      const id = typeof obj.id === 'string' ? obj.id : ''
+      const name = typeof obj.thread_name === 'string' ? obj.thread_name : ''
+      if (!id || !name) continue
+      if (this.threadTitles.get(id) !== name) {
+        this.threadTitles.set(id, name)
+        changed.push(id)
+      }
+    }
+
+    // 标题被重命名时，即便会话已静默也要把新名字同步到任务上
+    if (changed.length === 0) return
+    for (const session of this.sessions.values()) {
+      if (!changed.includes(session.sessionId)) continue
+      this.push({
+        tool: this.id,
+        externalSessionId: session.sessionId,
+        ts: Date.now(),
+        title: this.titleFor(session),
+        workspace: session.cwd,
+        project: this.projectFor(session),
+        authoritativeTitle: true,
+        tokensSource: 'unavailable',
+        skipEventLog: true,
+        dedupeKey: `title:${session.sessionId}:${this.threadTitles.get(session.sessionId)}`,
+        ...emptyUsage()
+      })
+    }
   }
 
   private handleLine(line: string, meta: LineContext): void {
@@ -194,8 +282,10 @@ export class CodexAdapter extends BaseAdapter {
           tool: this.id,
           externalSessionId: session.sessionId,
           ts,
-          title: session.cwd ? basename(session.cwd) : undefined,
+          title: this.titleFor(session),
           workspace: session.cwd,
+          project: this.projectFor(session),
+          authoritativeTitle: true,
           model: session.model,
           tokensSource: 'unavailable',
           skipEventLog: true,
@@ -288,12 +378,13 @@ export class CodexAdapter extends BaseAdapter {
       tool: this.id,
       externalSessionId: sessionId,
       ts,
-      title: cwd ? basename(cwd) : undefined,
+      title: this.titleFor(metaInfo),
       workspace: cwd,
+      project: this.projectFor(metaInfo),
+      authoritativeTitle: true,
       model: metaInfo.model,
       tokensSource: 'native',
       dedupeKey: `meta:${meta.relPath}`,
-      authoritativeTitle: true,
       ...emptyUsage()
     })
   }
@@ -369,8 +460,10 @@ export class CodexAdapter extends BaseAdapter {
       tool: this.id,
       externalSessionId: session.sessionId,
       ts,
-      title: session.cwd ? basename(session.cwd) : undefined,
+      title: this.titleFor(session),
       workspace: session.cwd,
+      project: this.projectFor(session),
+      authoritativeTitle: true,
       model: session.model ?? session.provider,
       inputTokens: billableInput,
       outputTokens: output,
