@@ -133,7 +133,9 @@ export class DeepSeekHarnessAdapter extends BaseAdapter {
       project,
       title: session.title,
       model: session.model,
-      authoritativeTitle: true
+      authoritativeTitle: true,
+      // 一次会话就是一个任务，跨天也不拆
+      keepSession: true
     }
     const empty = {
       inputTokens: 0,

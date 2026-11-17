@@ -208,6 +208,8 @@ export interface StateSignal {
   /** 会话所属项目名 */
   project?: string
   model?: string
+  /** 同一会话的多次活动始终归入同一任务（IDE 类数据源：一次对话就是一个任务） */
+  keepSession?: boolean
   /** 会话真实开始时间，hook / 心跳可提供 */
   startedAtHint?: number
 }

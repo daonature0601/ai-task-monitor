@@ -28,8 +28,18 @@ export function isEmptyRound(task: {
   turnEndedAt?: number
   endedAt?: number
   lastEventAt: number
+  eventCount?: number
+  inputTokens?: number
+  outputTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
 }): boolean {
   if (task.status !== 'ended') return false
+  // 只有标题、没有任何用量事件的会话（多为中断的对话）不进入列表
+  const events = task.eventCount ?? 0
+  const tokens =
+    (task.inputTokens ?? 0) + (task.outputTokens ?? 0) + (task.cacheReadTokens ?? 0) + (task.cacheWriteTokens ?? 0)
+  if (events === 0 && tokens === 0) return true
   const end = task.turnEndedAt ?? task.endedAt ?? task.lastEventAt
   return end <= task.turnStartedAt
 }

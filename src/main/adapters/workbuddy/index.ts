@@ -106,6 +106,7 @@ export class WorkBuddyAdapter extends BaseAdapter {
       this.push({
         tool: this.id,
         externalSessionId: sessionId,
+      keepSession: true,
         ts: ts || Date.now(),
         title,
         workspace: cwd,
@@ -123,6 +124,7 @@ export class WorkBuddyAdapter extends BaseAdapter {
       this.push({
         tool: this.id,
         externalSessionId: sessionId,
+      keepSession: true,
         ts: ts || Date.now(),
         title: this.titles.get(sessionId),
         workspace: cwd,
@@ -143,6 +145,7 @@ export class WorkBuddyAdapter extends BaseAdapter {
         this.push({
           tool: this.id,
           externalSessionId: sessionId,
+      keepSession: true,
           ts: ts || Date.now(),
           title: this.titles.get(sessionId),
           workspace: cwd,
@@ -158,6 +161,7 @@ export class WorkBuddyAdapter extends BaseAdapter {
         this.push({
           tool: this.id,
           externalSessionId: sessionId,
+      keepSession: true,
           ts: ts || Date.now(),
           title: this.titles.get(sessionId),
           workspace: cwd,
@@ -201,6 +205,7 @@ export class WorkBuddyAdapter extends BaseAdapter {
     this.push({
       tool: this.id,
       externalSessionId: sessionId,
+      keepSession: true,
       ts: ts || Date.now(),
       title: this.titles.get(sessionId),
       workspace: cwd,

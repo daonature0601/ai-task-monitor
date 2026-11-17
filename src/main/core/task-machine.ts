@@ -274,10 +274,13 @@ export class TaskMachine {
     let taskId = this.latestByBase.get(baseId) ?? baseId
     let task = this.tasks.get(taskId)
 
-    // 同一会话内的状态信号间隔过大，视为新一段工作
+    // 同一会话内的状态信号间隔过大，视为新一段工作。
+    // 但只在上一段**已经结束**时才切分 —— 任务还活着（running / idle）说明
+    // 是同一段工作，另起一个 `~ts` 任务只会得到一张 0 token 的重复卡片
+    // （IDE 类数据源的 token 都记在基础 id 上，切出去的分身永远没有用量）。
     if (task) {
       const anchor = task.lastStateAt ?? task.startedAt
-      if (eventTs - anchor > BURST_GAP_MS) {
+      if (!signal.keepSession && task.status === 'ended' && eventTs - anchor > BURST_GAP_MS) {
         task = undefined
         taskId = `${baseId}~${eventTs}`
       }

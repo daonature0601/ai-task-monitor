@@ -246,6 +246,8 @@ export class CodeBuddyAdapter extends BaseAdapter {
         phase: 'active',
         ts: updatedAt,
         source: 'io',
+        // IDE 的一次对话就是一个任务：中间停顿多久都不拆
+        keepSession: true,
         title: 'CodeBuddy 会话',
         project: 'CodeBuddy',
         startedAtHint: typeof parsed.createdAt === 'number' ? parsed.createdAt : undefined
