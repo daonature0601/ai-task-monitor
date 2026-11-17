@@ -1,0 +1,132 @@
+import type Database from 'better-sqlite3'
+
+interface Migration {
+  version: number
+  name: string
+  up: (db: Database.Database) => void
+}
+
+const V1 = `
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  tool TEXT NOT NULL,
+  external_session_id TEXT NOT NULL,
+  title TEXT,
+  workspace TEXT,
+  model TEXT,
+  status TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  last_event_at INTEGER NOT NULL,
+  ended_at INTEGER,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  tokens_source TEXT NOT NULL DEFAULT 'unavailable',
+  event_count INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_tool_time ON tasks(tool, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, last_event_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_time ON tasks(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS usage_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  ts INTEGER NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  dedupe_key TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_dedupe ON usage_events(task_id, dedupe_key);
+CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_events(ts DESC);
+
+CREATE TABLE IF NOT EXISTS file_cursors (
+  path TEXT PRIMARY KEY,
+  offset INTEGER NOT NULL DEFAULT 0,
+  inode TEXT,
+  mtime INTEGER,
+  last_read_at INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pricing (
+  id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  match TEXT NOT NULL,
+  input_per_m REAL NOT NULL DEFAULT 0,
+  output_per_m REAL NOT NULL DEFAULT 0,
+  cache_read_per_m REAL NOT NULL DEFAULT 0,
+  cache_write_per_m REAL NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS adapter_state (
+  id TEXT PRIMARY KEY,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  events_today INTEGER NOT NULL DEFAULT 0,
+  last_event_at INTEGER,
+  message TEXT,
+  updated_at INTEGER
+);
+`
+
+/**
+ * v2：价目表增加可信度标记。
+ * 旧种子价目（含未核实的推算值）会被清空，由 seedPricingIfEmpty 重新写入
+ * 「已核实 / 待确认」两态数据，避免历史错误的单价继续参与计费。
+ */
+const V2 = `
+ALTER TABLE pricing ADD COLUMN status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE pricing ADD COLUMN source TEXT;
+ALTER TABLE pricing ADD COLUMN note TEXT;
+DELETE FROM pricing;
+
+ALTER TABLE tasks ADD COLUMN cost_known INTEGER NOT NULL DEFAULT 0;
+UPDATE tasks SET cost_known = 0, cost_usd = 0;
+`
+
+const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    name: 'initial-schema',
+    up: (db) => {
+      db.exec(V1)
+    }
+  },
+  {
+    version: 2,
+    name: 'pricing-verification',
+    up: (db) => {
+      db.exec(V2)
+    }
+  }
+]
+
+export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1].version
+
+export function runMigrations(db: Database.Database): void {
+  const current = db.pragma('user_version', { simple: true }) as number
+  if (current >= LATEST_VERSION) return
+
+  const apply = db.transaction(() => {
+    for (const migration of MIGRATIONS) {
+      if (migration.version <= current) continue
+      migration.up(db)
+      db.pragma(`user_version = ${migration.version}`)
+    }
+  })
+
+  apply()
+  console.log(`[db] migrated ${current} -> ${LATEST_VERSION}`)
+}

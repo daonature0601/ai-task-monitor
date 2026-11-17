@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <!-- Electron 渲染进程需要 JIT -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- better-sqlite3 / classic-level 为原生模块，需要关闭库验证 -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- 读取用户目录下的工具日志与数据库 -->
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+  </dict>
+</plist>

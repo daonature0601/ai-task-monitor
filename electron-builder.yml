@@ -1,0 +1,63 @@
+appId: com.sanwuwy.aitaskmonitor
+productName: AI Task Monitor
+copyright: Copyright © 2026 sanwuwy
+
+directories:
+  buildResources: resources
+  output: release
+
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+  # MIT 要求在分发的副本中保留版权与许可声明
+  - LICENSE
+
+# 原生依赖已在 npm run setup 阶段装好 Electron ABI 预编译产物，
+# 不再让 electron-builder 触发 node-gyp 重建（Python 3.12 已移除 distutils）。
+npmRebuild: false
+
+# 默认只打包中文与英文语言包，去掉其余 Chromium locale 以减小体积
+electronLanguages:
+  - zh_CN
+  - en
+
+# macOS 的 *.lproj 不受 electronLanguages 控制，需在 afterPack 阶段显式裁剪
+afterPack: scripts/after-pack.cjs
+
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/classic-level/**
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlementsInherit: resources/entitlements.mac.plist
+  extendInfo:
+    LSUIElement: false
+
+dmg:
+  contents:
+    - x: 140
+      y: 180
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: AI Task Monitor

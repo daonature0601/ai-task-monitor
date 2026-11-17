@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-900 text-fg-hi font-sans antialiased;
+    background-image:
+      radial-gradient(1200px 600px at 12% -8%, rgba(124, 107, 255, 0.13), transparent 60%),
+      radial-gradient(900px 520px at 92% 4%, rgba(34, 211, 238, 0.09), transparent 58%),
+      linear-gradient(180deg, #0a0e14 0%, #080b11 100%);
+    background-attachment: fixed;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  ::selection {
+    background: rgba(34, 211, 238, 0.28);
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.16);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply rounded-2xl border border-white/[0.055] bg-ink-800/55 shadow-glass backdrop-blur-xl;
+  }
+
+  .glass-hover {
+    @apply transition-all duration-200 hover:border-white/[0.11] hover:bg-ink-750/65;
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  .label-xs {
+    @apply text-caption uppercase tracking-[0.12em] text-fg-lo;
+  }
+
+  .divider {
+    @apply h-px w-full bg-white/[0.05];
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.03] px-2.5 py-1 text-caption text-fg-mid transition-colors;
+  }
+
+  .chip-active {
+    @apply border-accent-cyan/35 bg-accent-cyan/10 text-accent-cyan;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/[0.08] bg-white/[0.04] px-3 py-1.5 text-body text-fg-mid transition-all duration-150 hover:border-white/[0.16] hover:bg-white/[0.07] hover:text-fg-hi active:scale-[0.985] disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply border-accent-cyan/30 bg-accent-cyan/[0.12] text-accent-cyan hover:border-accent-cyan/50 hover:bg-accent-cyan/[0.18] hover:text-accent-cyan;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-white/[0.08] bg-ink-950/60 px-3 py-1.5 text-body text-fg-hi outline-none transition-colors placeholder:text-fg-lo focus:border-accent-cyan/45 focus:ring-1 focus:ring-accent-cyan/20;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .mask-fade-r {
+    -webkit-mask-image: linear-gradient(to right, black 82%, transparent 100%);
+    mask-image: linear-gradient(to right, black 82%, transparent 100%);
+  }
+}
+
+.recharts-cartesian-axis-tick-value {
+  fill: #5a6678;
+  font-size: 11px;
+}
+
+.recharts-default-tooltip {
+  border-radius: 10px !important;
+}

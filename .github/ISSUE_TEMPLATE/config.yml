@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题
+    url: https://github.com/sanwuwy/ai-task-monitor/security/policy
+    about: 请勿公开提交安全漏洞，通过 SECURITY.md 中的方式私下联系
+  - name: 使用与调试文档
+    url: https://github.com/sanwuwy/ai-task-monitor#readme
+    about: 采集通道、字段定义、桥接安装步骤都在 README 中

@@ -1,0 +1,48 @@
+name: 功能建议
+description: 提出新功能或改进想法
+title: '[Feature] '
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        想接入新的 AI 工具？请优先看 [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) 的「接入一个新的 AI 工具」一节，
+        按那里的信息填 issue 会更容易落地。
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及模块
+      multiple: true
+      options:
+        - 采集 / 适配器
+        - 统计口径
+        - 界面与交互
+        - 系统集成（托盘 / 自启动）
+        - 打包与分发
+        - 文档
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到的问题
+      description: 描述现状的不足，而不是直接给出方案
+      placeholder: 例如：WorkBuddy 的会话无法按项目聚合，看不出哪个项目烧得最多
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议的方案
+      placeholder: 例如：在统计页增加「按工作区」维度，支持排序与 drill-down
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案 / 参考实现（可选）
+      placeholder: 例如：ccusage 的 session 视图
