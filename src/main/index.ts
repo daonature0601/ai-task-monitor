@@ -284,6 +284,31 @@ async function captureUi(win: Electron.BrowserWindow): Promise<void> {
       }
 
       if (label === '概览') {
+        // 验证「进行中任务」指标与实时任务卡片数量一致（含静默）
+        const consistency = await win.webContents.executeJavaScript(
+          `(() => {
+             const label = Array.from(document.querySelectorAll('p'))
+               .find((p) => (p.textContent || '').trim() === '进行中任务');
+             const card = label ? label.closest('.glass') : null;
+             const text = card ? card.textContent || '' : '';
+             const value = (text.match(/进行中任务\\s*(\\d+)/) || [])[1] || 'n/a';
+             const cards = Array.from(document.querySelectorAll('button')).filter((b) => {
+               const cls = b.className || '';
+               return cls.includes('rounded-2xl') && cls.includes('text-left');
+             });
+             const statuses = cards.map((b) => {
+               const t = b.textContent || '';
+               if (t.includes('运行中')) return 'running';
+               if (t.includes('静默')) return 'idle';
+               return 'unknown';
+             });
+             return JSON.stringify({ metric: value, cards: cards.length, statuses });
+           })()`
+        )
+        console.log('[smoke] overview-consistency', consistency)
+      }
+
+      if (label === '概览') {
         // 验证「切换币种即刻刷新」：点击 CNY → 600ms 内指标卡应变成 ¥
         const probe = await win.webContents.executeJavaScript(
           `(async () => {

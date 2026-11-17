@@ -61,7 +61,7 @@ export function TitleBar(): JSX.Element {
         <div className="flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-2 py-1">
           <StatusDot tone={paused ? 'off' : running > 0 ? 'ok' : 'info'} pulse={!paused && running > 0} />
           <span className="num text-caption text-fg-mid">
-            {paused ? '暂停' : activeCount > 0 ? `${running} 运行中` : '监听中'}
+            {paused ? '暂停' : activeCount > 0 ? `${activeCount} 进行中` : '监听中'}
           </span>
         </div>
 

@@ -114,7 +114,7 @@ export function Sidebar(): JSX.Element {
               collapsed && 'w-0 opacity-0'
             )}
           >
-            {paused ? '已暂停' : activeCount > 0 ? `${running} 个任务运行中` : '监听中'}
+            {paused ? '已暂停' : activeCount > 0 ? `${activeCount} 个任务进行中` : '监听中'}
           </span>
         </div>
 

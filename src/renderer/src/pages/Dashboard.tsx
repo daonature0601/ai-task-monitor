@@ -17,11 +17,10 @@ export function Dashboard(): JSX.Element {
 
   const currency = snapshot?.currency ?? 'USD'
   const fxRate = snapshot?.fxRate ?? 7.2
-  // 「实时任务」只展示真正在跑的任务；
-  // 静默（>90s 无事件）可能只是长思考，也可能是已结束但尚未结算的残留，
-  // 混在一起会让人误以为有多个任务同时在跑，因此单独用计数提示。
+  // 「实时任务」= 进行中（运行中 + 静默），与指标卡口径完全一致。
+  // 静默任务在卡片上有独立的状态文字（静默），不会与运行中混淆。
   const liveTasks = useMemo(
-    () => (snapshot?.tasks ?? []).filter((task) => task.status === 'running'),
+    () => (snapshot?.tasks ?? []).filter((task) => task.status !== 'ended'),
     [snapshot]
   )
   const idleCount = snapshot?.summary.idleCount ?? 0
@@ -71,10 +70,12 @@ export function Dashboard(): JSX.Element {
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Metric
-          label="运行中任务"
-          value={String(summary?.runningCount ?? 0)}
+          label="进行中任务"
+          value={String((summary?.runningCount ?? 0) + (summary?.idleCount ?? 0))}
           hint={
             <span className="flex items-center gap-2">
+              <span>运行中 {summary?.runningCount ?? 0}</span>
+              <span className="text-fg-lo/50">·</span>
               <span>静默 {summary?.idleCount ?? 0}</span>
               <span className="text-fg-lo/50">·</span>
               <span className="num">今日共 {today?.todayTasks ?? 0} 个</span>
@@ -113,8 +114,8 @@ export function Dashboard(): JSX.Element {
             action={
               <span className="flex items-center gap-1.5 text-caption text-fg-lo">
                 <Activity size={12} />
-                {liveTasks.length} 个运行中
-                {idleCount > 0 ? ` · ${idleCount} 个静默` : ''}
+                {liveTasks.length} 个进行中
+                {idleCount > 0 ? ` · 其中 ${idleCount} 个静默` : ''}
               </span>
             }
           />
@@ -123,12 +124,8 @@ export function Dashboard(): JSX.Element {
               <Card className="p-0">
                 <EmptyState
                   icon={<Sparkles size={20} />}
-                  title="暂无运行中的 AI 任务"
-                  description={
-                    idleCount > 0
-                      ? `当前没有正在产生新事件的任务；另有 ${idleCount} 个任务处于静默（超过 90 秒无新事件），可在「任务」页按「进行中」查看。`
-                      : '开始使用 Codex、Claude Code、CodeBuddy、WorkBuddy、Cursor 或元宝，任务会自动出现在这里。若某个工具始终无数据，请到「适配器」页查看采集通道状态。'
-                  }
+                  title="暂无进行中的 AI 任务"
+                  description="开始使用 Codex、Claude Code、CodeBuddy、WorkBuddy、Cursor 或元宝，任务会自动出现在这里。若某个工具始终无数据，请到「适配器」页查看采集通道状态。"
                 />
               </Card>
             ) : (
