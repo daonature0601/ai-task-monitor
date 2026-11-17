@@ -158,15 +158,54 @@ export class TaskMachine {
     }
     if (delta.workspace && !task.workspace) task.workspace = delta.workspace
     if (delta.project && task.project !== delta.project) task.project = delta.project
+
+    const modelBefore = task.model
     if (delta.model) task.model = delta.model
 
-    task.inputTokens += positive(delta.inputTokens)
-    task.outputTokens += positive(delta.outputTokens)
-    task.cacheReadTokens += positive(delta.cacheReadTokens)
-    task.cacheWriteTokens += positive(delta.cacheWriteTokens)
+    const input = positive(delta.inputTokens)
+    const output = positive(delta.outputTokens)
+    const cacheRead = positive(delta.cacheReadTokens)
+    const cacheWrite = positive(delta.cacheWriteTokens)
+    task.inputTokens += input
+    task.outputTokens += output
+    task.cacheReadTokens += cacheRead
+    task.cacheWriteTokens += cacheWrite
     task.reasoningTokens += positive(delta.reasoningTokens)
     // 心跳只维持活跃度，不是用量事件，不计入事件数
     if (!delta.skipEventLog) task.eventCount += 1
+
+    // 费用按「事件」累加，而不是用累计 token 乘单价重算 ——
+    // 后者在 token 被重复导入或缺模型时会与事件流水不一致，
+    // 而事件流水是统计与导出的唯一真值。
+    const hasUsage = input + output + cacheRead + cacheWrite > 0
+    if (hasUsage && !delta.skipEventLog) {
+      const price = matchPrice(task.model, this.pricingRows)
+      const billable =
+        (task.tokensSource === 'native' || task.tokensSource === 'bridge') && !price.pending
+      if (billable && price.row) {
+        task.costUsd += computeCost(
+          { inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, reasoningTokens: 0 },
+          price.row,
+          eventTs
+        )
+        // 模型是这条事件才解析出来的：把此前按「无单价」累积的 0 补回来
+        if (delta.model && delta.model !== modelBefore && modelBefore === undefined && task.eventCount > 1) {
+          const prior = {
+            inputTokens: task.inputTokens - input,
+            outputTokens: task.outputTokens - output,
+            cacheReadTokens: task.cacheReadTokens - cacheRead,
+            cacheWriteTokens: task.cacheWriteTokens - cacheWrite,
+            reasoningTokens: 0
+          }
+          const priorCost = computeCost(prior, price.row, task.turnStartedAt || eventTs)
+          task.costUsd = Math.max(task.costUsd, priorCost + computeCost(
+            { inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, reasoningTokens: 0 },
+            price.row,
+            eventTs
+          ))
+        }
+      }
+    }
 
     if (SOURCE_WEIGHT[delta.tokensSource] > SOURCE_WEIGHT[task.tokensSource]) {
       task.tokensSource = delta.tokensSource
@@ -464,7 +503,10 @@ export class TaskMachine {
     const billable =
       (task.tokensSource === 'native' || task.tokensSource === 'bridge') && !price.pending
     task.costKnown = billable
-    task.costUsd = billable ? computeCost(task, price.row) : 0
+    // 费用在 ingest() 里按事件累加，这里**不再**用累计 token 重算，
+    // 否则 token 重复导入 / 模型迟到的历史任务会与事件流水对不上。
+    // 只有不可计价时才清零。
+    if (!billable) task.costUsd = 0
     task.cacheHitRate = computeCacheHitRate(task)
     task.durationMs = this.computeDuration(task, now)
     task.alerts = evaluateTask(task, this.settings, now)

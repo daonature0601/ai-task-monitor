@@ -4,6 +4,9 @@ import type { PricingRow } from '@shared/types'
 import { useMonitor } from '../../store/monitor'
 import { cn } from '../../lib/utils'
 
+type PriceKey = 'inputPerM' | 'outputPerM' | 'cacheReadPerM' | 'cacheWritePerM'
+const PRICE_KEYS: PriceKey[] = ['inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM']
+
 const COLUMNS: Array<{ key: keyof PricingRow; label: string; width: string }> = [
   { key: 'provider', label: '厂商', width: 'w-[88px]' },
   { key: 'match', label: '模型匹配', width: 'w-[124px]' },
@@ -131,19 +134,40 @@ export function PricingTable({
                     key={row.id}
                     className={cn('border-t border-white/[0.04]', !verified && 'bg-white/[0.012]')}
                   >
-                    {COLUMNS.map((col) => (
-                      <td key={col.key} className="px-1.5 py-1">
-                        <input
-                          value={String(row[col.key] ?? '')}
-                          onChange={(event) => update(index, col.key, event.target.value)}
-                          className={cn(
-                            'field h-[26px] px-1.5 py-0 text-[11px]',
-                            !verified && col.key !== 'provider' && col.key !== 'match' && 'text-fg-lo'
-                          )}
-                          inputMode={col.key === 'provider' || col.key === 'match' ? 'text' : 'decimal'}
-                        />
-                      </td>
-                    ))}
+                    {COLUMNS.map((col) => {
+                      // 单价按厂商原币种保存：国外 $ / 国内 ¥
+                      const isPrice = PRICE_KEYS.includes(col.key as PriceKey)
+                      const symbol = row.currency === 'CNY' ? '¥' : '$'
+                      return (
+                        <td key={col.key} className="px-1.5 py-1">
+                          <div className="relative">
+                            {isPrice && (
+                              <span
+                                className="pointer-events-none absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] text-fg-lo"
+                                title={row.currency === 'CNY' ? '人民币 / 百万 tokens' : '美元 / 百万 tokens'}
+                              >
+                                {symbol}
+                              </span>
+                            )}
+                            <input
+                              value={String(row[col.key] ?? '')}
+                              onChange={(event) => update(index, col.key, event.target.value)}
+                              className={cn(
+                                'field h-[26px] py-0 text-[11px]',
+                                isPrice ? 'pl-4 pr-1.5' : 'px-1.5',
+                                !verified &&
+                                  col.key !== 'provider' &&
+                                  col.key !== 'match' &&
+                                  'text-fg-lo'
+                              )}
+                              inputMode={
+                                col.key === 'provider' || col.key === 'match' ? 'text' : 'decimal'
+                              }
+                            />
+                          </div>
+                        </td>
+                      )
+                    })}
                     <td className="px-1.5 py-1">
                       <button
                         type="button"

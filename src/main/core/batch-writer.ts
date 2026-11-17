@@ -39,7 +39,8 @@ export class BatchWriter {
       cacheReadTokens: delta.cacheReadTokens,
       cacheWriteTokens: delta.cacheWriteTokens,
       reasoningTokens: delta.reasoningTokens,
-      costUsd: billable ? computeCost(delta, price.row) : 0,
+      // 分时计价：用事件自身时间判定高峰 / 非高峰
+      costUsd: billable ? computeCost(delta, price.row, delta.ts) : 0,
       dedupeKey: delta.dedupeKey
     })
   }

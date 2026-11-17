@@ -154,6 +154,29 @@ UPDATE tasks SET turn_started_at = started_at WHERE turn_started_at IS NULL;
 ALTER TABLE tasks ADD COLUMN project TEXT;
 `)
     }
+  },
+  {
+    /**
+     * v6：价目表支持分时计价（DeepSeek 的高峰 / 非高峰）。
+     * peak_json 存放高峰四价与时段，为空表示全天同价。
+     */
+    version: 6,
+    name: 'pricing-peak',
+    up: (db) => {
+      db.exec(`ALTER TABLE pricing ADD COLUMN peak_json TEXT;`)
+    }
+  },
+  {
+    /**
+     * v7：价目表记录报价币种。
+     * 国外厂商（OpenAI / Anthropic / DeepSeek）为 USD，国内厂商（智谱 / 腾讯）为 CNY，
+     * 入库保持厂商原币种，计价时统一折算成 USD 存储。
+     */
+    version: 7,
+    name: 'pricing-currency',
+    up: (db) => {
+      db.exec(`ALTER TABLE pricing ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD';`)
+    }
   }
 ]
 

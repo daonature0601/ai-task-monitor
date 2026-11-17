@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type Database from 'better-sqlite3'
+import { startOfDay } from '@shared/format'
 import type {
   AppSettings,
   BridgeStatus,
@@ -40,7 +41,7 @@ import { buildSnapshot } from './core/snapshot'
 import { evaluateTask } from './core/alerts'
 import type { CursorStore } from './collectors/jsonl-tailer'
 
-const EVENTS_COST_VERSION = 5
+const EVENTS_COST_VERSION = 9
 
 export interface RuntimeHooks {
   onSnapshot: (snapshot: SnapshotPayload) => void
@@ -141,6 +142,16 @@ export function createRuntime(
     console.error('[runtime] align codex titles failed', error)
   }
 
+  // 事件级费用回填：必须在 hydrate 之前完成 —— 否则内存里装载的是旧的任务费用，
+  // 下一次落盘又会把它写回去，重算等于没做。
+  if (settings.eventsCostVersion !== EVENTS_COST_VERSION) {
+    const result = recomputeEventCosts(db, pricing)
+    settings = writeSettings(db, { eventsCostVersion: EVENTS_COST_VERSION })
+    console.log(
+      `[db] recomputed event costs (${result.updated}/${result.total} rows) v${EVENTS_COST_VERSION}`
+    )
+  }
+
   const machine = new TaskMachine({ settings: () => settings, pricing: () => pricing })
   machine.hydrate(listRecentTasks(db, 800))
   // 心跳事件不再计入 event_count：清零历史遗留计数，
@@ -154,15 +165,6 @@ export function createRuntime(
   }
   // 价目表口径可能已升级（如新增「待确认」态），启动时按当前价目重算成本标记
   machine.refreshConfig(settings, pricing)
-
-  // 事件级费用回填：历史事件的模型名可能缺失，导致区间统计偏低
-  if (settings.eventsCostVersion !== EVENTS_COST_VERSION) {
-    const result = recomputeEventCosts(db, pricing)
-    settings = writeSettings(db, { eventsCostVersion: EVENTS_COST_VERSION })
-    console.log(
-      `[db] recomputed event costs (${result.updated}/${result.total} rows) v${EVENTS_COST_VERSION}`
-    )
-  }
 
   const writer = new BatchWriter(() => db, machine, () => pricing)
 
@@ -220,8 +222,8 @@ export function createRuntime(
   const publish = (force = false): void => {
     const now = Date.now()
     // 托盘与界面共用同一份「今日」口径：按用量事件时间归集的数据库汇总
-    const dayStart = new Date(now)
-    dayStart.setHours(0, 0, 0, 0)
+    // 「今日」按北京时间切分，与界面显示口径一致
+    const dayStart = new Date(startOfDay(now))
     let summary: ReturnType<typeof summaryFor> | undefined
     try {
       summary = summaryFor(db, dayStart.getTime(), now)

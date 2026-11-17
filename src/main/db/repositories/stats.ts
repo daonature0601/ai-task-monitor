@@ -9,7 +9,7 @@ import type {
   ToolId,
   TopTaskRow
 } from '@shared/types'
-import { dayKey } from '@shared/format'
+import { dayKey , startOfDay } from '@shared/format'
 
 /**
  * 统计口径（重要）：
@@ -89,8 +89,8 @@ export function dailySeries(db: Database.Database, from: number, to: number): Da
     .all(from, to) as Array<{ day: string; tool: string; cost: number }>
 
   const map = new Map<string, DailyPoint>()
-  const cursor = new Date(from)
-  cursor.setHours(0, 0, 0, 0)
+  // 北京时间的当天零点起步
+  const cursor = new Date(startOfDay(from))
   const end = new Date(to)
   while (cursor.getTime() <= end.getTime()) {
     const key = dayKey(cursor.getTime())

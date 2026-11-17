@@ -18,6 +18,7 @@ export function recomputeEventCosts(
   const rows = db
     .prepare(
       `SELECT e.id AS id,
+              e.ts AS ts,
               e.input_tokens AS input_tokens,
               e.output_tokens AS output_tokens,
               e.cache_read_tokens AS cache_read_tokens,
@@ -30,6 +31,7 @@ export function recomputeEventCosts(
     )
     .all() as Array<{
     id: number
+    ts: number
     input_tokens: number
     output_tokens: number
     cache_read_tokens: number
@@ -64,7 +66,7 @@ export function recomputeEventCosts(
         cacheWriteTokens: row.cache_write_tokens,
         reasoningTokens: row.reasoning_tokens
       }
-      const value = computeCost(usage, price)
+      const value = computeCost(usage, price, row.ts)
       if (Math.abs(value - row.cost_usd) > 1e-9) {
         update.run(value, row.id)
         updated += 1

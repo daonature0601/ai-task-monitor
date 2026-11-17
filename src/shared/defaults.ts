@@ -43,10 +43,7 @@ const ANTHROPIC_SRC = 'https://platform.claude.com/docs/en/about-claude/pricing'
 const OPENAI_SRC = 'https://platform.openai.com/docs/pricing'
 const DEEPSEEK_SRC = 'https://api-docs.deepseek.com/quick_start/pricing'
 const ZHIPU_SRC = 'https://docs.bigmodel.cn/cn/guide/start/pricing'
-
-/** 智谱官方以人民币报价，这里按 7.1 折算为美元（与界面汇率无关，仅用于入库） */
-const CNY_TO_USD = 7.1
-const cny = (value: number): number => Math.round((value / CNY_TO_USD) * 1000) / 1000
+const TENCENT_SRC = 'https://cloud.tencent.com/document/api/266/130055'
 
 /**
  * 价目表种子（单位：美元 / 百万 token，Standard 档）。
@@ -84,6 +81,7 @@ export const PRICING_SEED: PricingRow[] = [
   { id: 'anthropic-haiku-4.5', provider: 'Anthropic', match: 'claude-haiku-4.5*', inputPerM: 1, outputPerM: 5, cacheReadPerM: 0.1, cacheWritePerM: 1.25, status: 'verified', source: ANTHROPIC_SRC },
 
   // ── OpenAI（官方 API Pricing 页，Standard 档）────────────────
+  { id: 'openai-gpt-5.3-codex', provider: 'OpenAI', match: 'gpt-5.3-codex*', inputPerM: 1.75, outputPerM: 14, cacheReadPerM: 0.175, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC, note: 'Codex 专用档：$1.75/$14/$0.175；Priority 档 $3.5/$28' },
   { id: 'openai-gpt-6-astra', provider: 'OpenAI', match: 'gpt-6-astra*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5, status: 'verified', source: OPENAI_SRC, note: '缓存写入为 30m 档；12h 档 $25，长上下文翻倍' },
   { id: 'openai-gpt-6.1-sol', provider: 'OpenAI', match: 'gpt-6.1-sol*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.1, cacheWritePerM: 2.5, status: 'verified', source: OPENAI_SRC },
   { id: 'openai-gpt-6.1-terra', provider: 'OpenAI', match: 'gpt-6.1-terra*', inputPerM: 1, outputPerM: 5, cacheReadPerM: 0.05, cacheWritePerM: 1.25, status: 'verified', source: OPENAI_SRC },
@@ -100,23 +98,100 @@ export const PRICING_SEED: PricingRow[] = [
   { id: 'openai-gpt-5-mini', provider: 'OpenAI', match: 'gpt-5-mini*', inputPerM: 0.25, outputPerM: 2, cacheReadPerM: 0.025, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC },
   { id: 'openai-gpt-5-nano', provider: 'OpenAI', match: 'gpt-5-nano*', inputPerM: 0.05, outputPerM: 0.4, cacheReadPerM: 0.005, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC },
 
-  // ── DeepSeek（官方 Pricing 页，低谷价）──────────────────────
-  { id: 'deepseek-flash', provider: 'DeepSeek', match: 'deepseek-flash*', inputPerM: 0.15, outputPerM: 0.6, cacheReadPerM: 0.003, cacheWritePerM: 0.15, status: 'verified', source: DEEPSEEK_SRC, note: '低谷价；高峰（UTC 周一至周五 01-04 / 06-10）为 2 倍' },
-  { id: 'deepseek-v4.1-flash', provider: 'DeepSeek', match: 'deepseek-v4.1-flash*', inputPerM: 0.15, outputPerM: 0.6, cacheReadPerM: 0.003, cacheWritePerM: 0.15, status: 'verified', source: DEEPSEEK_SRC, note: '官方注明 deepseek-v4-flash 等旧名按 Flash 价计费' },
-  { id: 'deepseek-v4-flash-legacy', provider: 'DeepSeek', match: 'deepseek-v4-flash*', inputPerM: 0.15, outputPerM: 0.6, cacheReadPerM: 0.003, cacheWritePerM: 0.15, status: 'verified', source: DEEPSEEK_SRC, note: '旧名由 V4.1-Flash 承接，按 Flash 价计费' },
-  { id: 'deepseek-v4-pro', provider: 'DeepSeek', match: 'deepseek-v4-pro*', inputPerM: 0.66, outputPerM: 1.98, cacheReadPerM: 0.022, cacheWritePerM: 0.66, status: 'verified', source: DEEPSEEK_SRC, note: '低谷价；高峰为 2 倍' },
+  // ── DeepSeek（官方 Pricing 页，分时计价）────────────────────
+  // 高峰时段：UTC 01:00-04:00、06:00-10:00（周一至周五，对应北京时间 09:00-12:00、14:00-18:00）；
+  // 中国法定节假日全天按低谷计（节假日无法静态枚举，这里只按工作日+时段判定）。
+  {
+    id: 'deepseek-flash',
+    provider: 'DeepSeek',
+    match: 'deepseek-flash*',
+    inputPerM: 0.15,
+    outputPerM: 0.6,
+    cacheReadPerM: 0.003,
+    cacheWritePerM: 0.15,
+    peak: { inputPerM: 0.3, outputPerM: 1.2, cacheReadPerM: 0.006, cacheWritePerM: 0.3 },
+    peakHoursUtc: [
+      [1, 4],
+      [6, 10]
+    ],
+    peakWeekdaysOnly: true,
+    status: 'verified',
+    source: DEEPSEEK_SRC,
+    note: '低谷 $0.15/$0.6；高峰为 UTC 01-04、06-10（周一至周五，北京时间 09-12、14-18），价格翻倍'
+  },
+  {
+    id: 'deepseek-v4.1-flash',
+    provider: 'DeepSeek',
+    match: 'deepseek-v4.1-flash*',
+    inputPerM: 0.15,
+    outputPerM: 0.6,
+    cacheReadPerM: 0.003,
+    cacheWritePerM: 0.15,
+    peak: { inputPerM: 0.3, outputPerM: 1.2, cacheReadPerM: 0.006, cacheWritePerM: 0.3 },
+    peakHoursUtc: [
+      [1, 4],
+      [6, 10]
+    ],
+    peakWeekdaysOnly: true,
+    status: 'verified',
+    source: DEEPSEEK_SRC,
+    note: '官方注明 deepseek-v4-flash 等旧名按 Flash 价计费'
+  },
+  {
+    id: 'deepseek-v4-flash-legacy',
+    provider: 'DeepSeek',
+    match: 'deepseek-v4-flash*',
+    inputPerM: 0.15,
+    outputPerM: 0.6,
+    cacheReadPerM: 0.003,
+    cacheWritePerM: 0.15,
+    peak: { inputPerM: 0.3, outputPerM: 1.2, cacheReadPerM: 0.006, cacheWritePerM: 0.3 },
+    peakHoursUtc: [
+      [1, 4],
+      [6, 10]
+    ],
+    peakWeekdaysOnly: true,
+    status: 'verified',
+    source: DEEPSEEK_SRC,
+    note: '旧名由 V4.1-Flash 承接，按 Flash 价计费'
+  },
+  {
+    id: 'deepseek-v4-pro',
+    provider: 'DeepSeek',
+    match: 'deepseek-v4-pro*',
+    inputPerM: 0.66,
+    outputPerM: 1.98,
+    cacheReadPerM: 0.022,
+    cacheWritePerM: 0.66,
+    peak: { inputPerM: 1.32, outputPerM: 3.96, cacheReadPerM: 0.044, cacheWritePerM: 1.32 },
+    peakHoursUtc: [
+      [1, 4],
+      [6, 10]
+    ],
+    peakWeekdaysOnly: true,
+    status: 'verified',
+    source: DEEPSEEK_SRC,
+    note: '低谷 $0.66/$1.98；高峰（北京时间 09:00-12:00、14:00-18:00）翻倍'
+  },
 
   // ── 智谱 GLM（官方人民币价 ÷ 7.1）──────────────────────────
-  { id: 'zhipu-glm-5.3', provider: 'Zhipu', match: 'glm-5.3', inputPerM: cny(8), outputPerM: cny(28), cacheReadPerM: cny(2), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥8/¥28（命中 ¥2）/百万，按 7.1 折算' },
-  { id: 'zhipu-glm-5.3-flash', provider: 'Zhipu', match: 'glm-5.3-flash*', inputPerM: cny(0.8), outputPerM: cny(2.8), cacheReadPerM: cny(0.23), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥0.8/¥2.8（命中 ¥0.23）/百万，按 7.1 折算' },
-  { id: 'zhipu-glm-5.3-flashx', provider: 'Zhipu', match: 'glm-5.3-flashx*', inputPerM: cny(2), outputPerM: cny(7), cacheReadPerM: cny(0.57), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥2/¥7（命中 ¥0.57）/百万，按 7.1 折算' },
-  { id: 'zhipu-glm-5.2', provider: 'Zhipu', match: 'glm-5.2*', inputPerM: cny(8), outputPerM: cny(28), cacheReadPerM: cny(2), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '官方 ¥8/¥28（命中 ¥2）/百万，按 7.1 折算' },
-  { id: 'zhipu-glm-5.1', provider: 'Zhipu', match: 'glm-5.1*', inputPerM: cny(6), outputPerM: cny(24), cacheReadPerM: cny(1.3), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '≤32K 档；≥32K 为 ¥8/¥28，按 7.1 折算' },
-  { id: 'zhipu-glm-5', provider: 'Zhipu', match: 'glm-5*', inputPerM: cny(4), outputPerM: cny(18), cacheReadPerM: cny(1), cacheWritePerM: 0, status: 'verified', source: ZHIPU_SRC, note: '≤32K 档；≥32K 为 ¥6/¥22，按 7.1 折算' },
+  { id: 'zhipu-glm-5.3', provider: 'Zhipu', match: 'glm-5.3', inputPerM: 8, outputPerM: 28, cacheReadPerM: 2, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: ZHIPU_SRC, note: '官方 ¥8/¥28（命中 ¥2）/百万（人民币报价，入库按 7.1 折美元）' },
+  { id: 'zhipu-glm-5.3-flash', provider: 'Zhipu', match: 'glm-5.3-flash*', inputPerM: 0.8, outputPerM: 2.8, cacheReadPerM: 0.23, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: ZHIPU_SRC, note: '官方 ¥0.8/¥2.8（命中 ¥0.23）/百万（人民币报价，入库按 7.1 折美元）' },
+  { id: 'zhipu-glm-5.3-flashx', provider: 'Zhipu', match: 'glm-5.3-flashx*', inputPerM: 2, outputPerM: 7, cacheReadPerM: 0.57, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: ZHIPU_SRC, note: '官方 ¥2/¥7（命中 ¥0.57）/百万（人民币报价，入库按 7.1 折美元）' },
+  { id: 'zhipu-glm-5.2', provider: 'Zhipu', match: 'glm-5.2*', inputPerM: 8, outputPerM: 28, cacheReadPerM: 2, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: ZHIPU_SRC, note: '官方 ¥8/¥28（命中 ¥2）/百万（人民币报价，入库按 7.1 折美元）' },
+  { id: 'zhipu-glm-5.1', provider: 'Zhipu', match: 'glm-5.1*', inputPerM: 6, outputPerM: 24, cacheReadPerM: 1.3, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: ZHIPU_SRC, note: '≤32K 档；≥32K 为 ¥8/¥28，按 7.1 折算' },
+  { id: 'zhipu-glm-5', provider: 'Zhipu', match: 'glm-5*', inputPerM: 4, outputPerM: 18, cacheReadPerM: 1, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: ZHIPU_SRC, note: '≤32K 档；≥32K 为 ¥6/¥22，按 7.1 折算' },
+
+  // ── 腾讯混元（TokenHub 模型价格页，人民币折算）──────────────
+  { id: 'tencent-hy4', provider: 'Tencent', match: 'hy4*', inputPerM: 6, outputPerM: 18, cacheReadPerM: 0.3, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: TENCENT_SRC, note: '官方 ¥6/¥18（命中 ¥0.3）/百万（人民币报价，入库按 7.1 折美元）' },
+  { id: 'tencent-hy4-preview', provider: 'Tencent', match: 'hy4-preview*', inputPerM: 6, outputPerM: 18, cacheReadPerM: 0.3, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: TENCENT_SRC, note: '与 Hy4 同价：¥6/¥18（命中 ¥0.3）/百万' },
+  { id: 'tencent-hy4-flash', provider: 'Tencent', match: 'hy4-flash*', inputPerM: 0.5, outputPerM: 2, cacheReadPerM: 0.02, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: TENCENT_SRC, note: 'Hy4 flash：¥0.5/¥2（命中 ¥0.02）/百万' },
+  { id: 'tencent-hy3', provider: 'Tencent', match: 'hy3*', inputPerM: 1, outputPerM: 4, cacheReadPerM: 0.25, cacheWritePerM: 0, currency: 'CNY', status: 'verified', source: TENCENT_SRC, note: 'Hy3：¥1/¥4（命中 ¥0.25）/百万' },
 
   // ── 待确认：官方价目表未列，禁止推算 ────────────────────────
-  { id: 'openai-codex', provider: 'OpenAI', match: 'codex-*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: 'Codex 走订阅额度，API 定价页无 token 单价，需查订阅账单后手工补录' },
-  { id: 'tencent-hy', provider: 'Tencent', match: 'hy*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: 'CodeBuddy 内部别名（hy3/hy4…），混元官方刊例价无对应项' },
-  { id: 'zhipu-ioa', provider: 'Zhipu', match: 'glm-*-ioa', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: '带 -ioa 后缀的内部变体，官方价目表未列' },
+  { id: 'tencent-hy-free', provider: 'Tencent', match: 'hy4-free*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: 'WorkBuddy 免费档位（-free），官方无单价' },
+  { id: 'tencent-hy4-flash-free', provider: 'Tencent', match: 'hy4-flash-free*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: 'WorkBuddy 免费档位（-free），官方无单价' },
+  { id: 'tencent-hy-generic', provider: 'Tencent', match: 'hy*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: '未识别的混元别名，需补录' },
+  { id: 'openai-codex-subscription', provider: 'OpenAI', match: 'codex-auto-review*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: 'Codex 内部自动审查线程，不计费也不应建成任务' },
   { id: 'fallback', provider: '未知', match: '*', inputPerM: 0, outputPerM: 0, cacheReadPerM: 0, cacheWritePerM: 0, status: 'pending', note: '未匹配任何已核实模型' }
 ]

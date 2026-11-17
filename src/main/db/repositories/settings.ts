@@ -60,7 +60,7 @@ export function listPricing(db: Database.Database): PricingRow[] {
   const rows = db
     .prepare(
       `SELECT id, provider, match, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m,
-              status, source, note
+              status, source, note, peak_json, currency
        FROM pricing ORDER BY provider, id`
     )
     .all() as Array<{
@@ -74,6 +74,8 @@ export function listPricing(db: Database.Database): PricingRow[] {
     status: string
     source: string | null
     note: string | null
+    peak_json: string | null
+    currency: string | null
   }>
   return rows.map((r) => ({
     id: r.id,
@@ -85,15 +87,23 @@ export function listPricing(db: Database.Database): PricingRow[] {
     cacheWritePerM: r.cache_write_per_m,
     status: r.status === 'verified' ? 'verified' : 'pending',
     source: r.source ?? undefined,
-    note: r.note ?? undefined
+    note: r.note ?? undefined,
+    currency: r.currency === 'CNY' ? 'CNY' : 'USD',
+    ...parsePeak(r.peak_json)
   }))
 }
 
 export function replacePricing(db: Database.Database, rows: PricingRow[]): PricingRow[] {
   const insert = db.prepare(
-    `INSERT INTO pricing (id, provider, match, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, status, source, note)
-     VALUES (@id, @provider, @match, @inputPerM, @outputPerM, @cacheReadPerM, @cacheWritePerM, @status, @source, @note)`
+    `INSERT INTO pricing (id, provider, match, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, status, source, note, peak_json, currency)
+     VALUES (@id, @provider, @match, @inputPerM, @outputPerM, @cacheReadPerM, @cacheWritePerM, @status, @source, @note, @peakJson, @currency)`
   )
+  // 界面保存的行不带分时配置，这里从库里按 id 继承，避免编辑一次就把 DeepSeek 的峰谷价清掉
+  const existingPeak = new Map<string, string | null>()
+  for (const row of db.prepare('SELECT id, peak_json FROM pricing').all() as Array<{ id: string; peak_json: string | null }>) {
+    existingPeak.set(row.id, row.peak_json)
+  }
+
   const tx = db.transaction((list: PricingRow[]) => {
     db.prepare('DELETE FROM pricing').run()
     for (const row of list) {
@@ -110,12 +120,57 @@ export function replacePricing(db: Database.Database, rows: PricingRow[]): Prici
         cacheWritePerM: status === 'verified' ? Math.max(0, row.cacheWritePerM || 0) : 0,
         status,
         source: row.source ?? null,
-        note: row.note ?? null
+        note: row.note ?? null,
+        peakJson: status === 'verified' ? (serializePeak(row) ?? existingPeak.get(row.id) ?? null) : null,
+        currency: row.currency === 'CNY' ? 'CNY' : 'USD'
       })
     }
   })
   tx(rows)
   return listPricing(db)
+}
+
+/** 分时配置的存储形态：高峰四价 + 时段 + 是否仅工作日 */
+interface PeakPayload {
+  inputPerM: number
+  outputPerM: number
+  cacheReadPerM: number
+  cacheWritePerM: number
+  hours: Array<[number, number]>
+  weekdaysOnly: boolean
+}
+
+function parsePeak(json: string | null): Pick<
+  PricingRow,
+  'peak' | 'peakHoursUtc' | 'peakWeekdaysOnly'
+> {
+  if (!json) return {}
+  try {
+    const parsed = JSON.parse(json) as Partial<PeakPayload>
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.hours)) return {}
+    return {
+      peak: {
+        inputPerM: Number(parsed.inputPerM) || 0,
+        outputPerM: Number(parsed.outputPerM) || 0,
+        cacheReadPerM: Number(parsed.cacheReadPerM) || 0,
+        cacheWritePerM: Number(parsed.cacheWritePerM) || 0
+      },
+      peakHoursUtc: parsed.hours,
+      peakWeekdaysOnly: Boolean(parsed.weekdaysOnly)
+    }
+  } catch {
+    return {}
+  }
+}
+
+function serializePeak(row: PricingRow): string | null {
+  if (!row.peak || !row.peakHoursUtc || row.peakHoursUtc.length === 0) return null
+  const payload: PeakPayload = {
+    ...row.peak,
+    hours: row.peakHoursUtc,
+    weekdaysOnly: Boolean(row.peakWeekdaysOnly)
+  }
+  return JSON.stringify(payload)
 }
 
 export function seedPricingIfEmpty(db: Database.Database): void {

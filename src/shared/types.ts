@@ -229,10 +229,26 @@ export interface PricingRow {
   cacheReadPerM: number
   cacheWritePerM: number
   status: PricingStatus
+  /**
+   * 报价币种：以厂商发布价为准（OpenAI / Anthropic / DeepSeek 官方站为 USD，
+   * 智谱、腾讯云为 CNY）。入库时保持原币种，计价时统一折算成 USD 存储。
+   */
+  currency?: 'USD' | 'CNY'
   /** 官方来源链接，verified 行必填 */
   source?: string
   /** 计价口径补充说明，如分时计价 */
   note?: string
+  /** 高峰价（维度同上面四个字段）；未提供则全天同价 */
+  peak?: {
+    inputPerM: number
+    outputPerM: number
+    cacheReadPerM: number
+    cacheWritePerM: number
+  }
+  /** 高峰时段（UTC 小时，左闭右开），如 DeepSeek 的 [[1,4],[6,10]] */
+  peakHoursUtc?: Array<[number, number]>
+  /** 高峰是否只在周一至周五（UTC）生效 */
+  peakWeekdaysOnly?: boolean
 }
 
 export interface TaskQuery {

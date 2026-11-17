@@ -120,9 +120,51 @@ function pad(n: number): string {
   return String(n).padStart(2, '0')
 }
 
+/**
+ * 全应用时间显示跟随**系统时区**（当前设备为北京时间）。
+ *
+ * 集中在一处格式化，保证「今天 / 昨天」、事件时间线与统计分日
+ * 与系统时钟一致；换算逻辑不散落在各个组件里。
+ */
+const DAY_MS = 86_400_000
+
+const localFormatter = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23'
+})
+
+interface ClockParts {
+  year: string
+  month: string
+  day: string
+  hour: string
+  minute: string
+  second: string
+}
+
+function clockParts(ts: number): ClockParts {
+  const date = new Date(Number.isFinite(ts) ? ts : 0)
+  const parts = localFormatter.formatToParts(date)
+  const pick = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value ?? '00'
+  return {
+    year: pick('year'),
+    month: pick('month'),
+    day: pick('day'),
+    hour: pick('hour'),
+    minute: pick('minute'),
+    second: pick('second')
+  }
+}
+
 export function formatTimeFull(ts: number): string {
-  const d = new Date(ts)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  const p = clockParts(ts)
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`
 }
 
 /**
@@ -131,21 +173,21 @@ export function formatTimeFull(ts: number): string {
  * 只显示时分秒会让人误以为是"未来的时间"。
  */
 export function formatEventTime(ts: number, now = Date.now()): string {
-  const d = new Date(ts)
-  const hms = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  const p = clockParts(ts)
+  const hms = `${p.hour}:${p.minute}:${p.second}`
   const today = startOfDay(now)
   if (ts >= today) return hms
-  if (ts >= today - 86_400_000) return `昨天 ${hms}`
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hms}`
+  if (ts >= today - DAY_MS) return `昨天 ${hms}`
+  return `${p.month}-${p.day} ${hms}`
 }
 
 export function formatTimeShort(ts: number, now = Date.now()): string {
-  const d = new Date(ts)
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  const p = clockParts(ts)
+  const hm = `${p.hour}:${p.minute}`
   const today = startOfDay(now)
   if (ts >= today) return `今天 ${hm}`
-  if (ts >= today - 86_400_000) return `昨天 ${hm}`
-  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`
+  if (ts >= today - DAY_MS) return `昨天 ${hm}`
+  return `${p.month}-${p.day} ${hm}`
 }
 
 export function formatRelative(ts: number | null, now = Date.now()): string {
@@ -158,15 +200,16 @@ export function formatRelative(ts: number | null, now = Date.now()): string {
   return `${Math.floor(diff / 86_400_000)} 天前`
 }
 
+/** 系统时区的当天零点（毫秒时间戳） */
 export function startOfDay(ts: number): number {
-  const d = new Date(ts)
+  const d = new Date(Number.isFinite(ts) ? ts : 0)
   d.setHours(0, 0, 0, 0)
   return d.getTime()
 }
 
 export function dayKey(ts: number): string {
-  const d = new Date(ts)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const p = clockParts(ts)
+  return `${p.year}-${p.month}-${p.day}`
 }
 
 export const STATUS_LABEL: Record<string, string> = {
