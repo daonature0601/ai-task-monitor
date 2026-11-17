@@ -6,7 +6,7 @@ import type {
   ToolId,
   UsageDelta
 } from '@shared/types'
-import { computeCacheHitRate, startOfDay } from '@shared/format'
+import { computeCacheHitRate, dayKey, startOfDay } from '@shared/format'
 import { computeCost, matchPrice } from './pricing'
 import { evaluateTask } from './alerts'
 
@@ -81,12 +81,20 @@ export class TaskMachine {
     const eventTs = delta.ts || Date.now()
     let taskId = this.latestByBase.get(baseId) ?? baseId
     let task = this.tasks.get(taskId)
+    let isBackfill = false
 
-    if (task && eventTs - task.lastEventAt > BURST_GAP_MS) {
+    // 乱序 / 历史回填：事件明显早于当前活动段的起点（例如合并进来的子代理
+    // 昨天写的日志），不能塞进今天正在进行的任务，否则时间线会出现"昨天的时间"。
+    // 这类事件按「天」聚合到独立的历史任务里。
+    if (task && eventTs < task.startedAt - BURST_GAP_MS) {
+      isBackfill = true
+      taskId = `${baseId}~h${dayKey(eventTs)}`
+      task = this.tasks.get(taskId)
+    } else if (task && eventTs - task.lastEventAt > BURST_GAP_MS) {
       task = undefined
       taskId = `${baseId}~${eventTs}`
     }
-    if (!task) taskId = this.tasks.has(taskId) ? `${baseId}~${eventTs}` : taskId
+    if (!task && !isBackfill) taskId = this.tasks.has(taskId) ? `${baseId}~${eventTs}` : taskId
 
     const dedupe = `${taskId}#${delta.dedupeKey}`
     if (this.seen.has(dedupe)) return { applied: false, taskId }
@@ -118,11 +126,11 @@ export class TaskMachine {
         alerts: []
       }
       this.tasks.set(taskId, task)
-      this.latestByBase.set(baseId, taskId)
+      if (!isBackfill) this.latestByBase.set(baseId, taskId)
     }
 
     this.remember(dedupe)
-    this.latestByBase.set(baseId, taskId)
+    if (!isBackfill) this.latestByBase.set(baseId, taskId)
 
     // 心跳类数据源一开始可能只有临时目录名（如 "T"），后续更具体的标题应覆盖它
     const incomingTitle = delta.title?.trim()
@@ -228,6 +236,15 @@ export class TaskMachine {
   }
 
   /** 取走脏任务（供批量写库） */
+  /** 清空内存状态（重建历史索引时使用，数据库已先行清空） */
+  reset(): void {
+    this.tasks.clear()
+    this.latestByBase.clear()
+    this.seen.clear()
+    this.seenOrder.length = 0
+    this.dirty.clear()
+  }
+
   drainDirty(): TaskSnapshot[] {
     if (this.dirty.size === 0) return []
     const out: TaskSnapshot[] = []

@@ -159,6 +159,8 @@ export interface AppSettings {
   alertDurationDangerMs: number
   alertCacheHitMinRate: number
   retentionDays: number
+  /** 首次回填窗口（天）：可调大后重建索引以恢复更早的历史 */
+  backfillDays: number
   /** 事件费用回填版本，用于一次性重算历史流水 */
   eventsCostVersion: number
   launchAtLogin: boolean

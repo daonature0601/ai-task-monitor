@@ -23,6 +23,7 @@ export const IPC = {
   adaptersRescan: 'monitor:adapters:rescan',
   settingsGet: 'monitor:settings:get',
   settingsUpdate: 'monitor:settings:update',
+  settingsRebuild: 'monitor:settings:rebuild',
   pricingGet: 'monitor:pricing:get',
   pricingUpdate: 'monitor:pricing:update',
   pricingReset: 'monitor:pricing:reset',
@@ -49,6 +50,8 @@ export interface MonitorApi {
   rescanAdapters: () => Promise<AdapterInfo[]>
   getSettings: () => Promise<AppSettings>
   updateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>
+  /** 清空派生数据并按指定天数重扫日志，用于恢复更早的历史 */
+  rebuildHistory: (days: number) => Promise<AppSettings>
   getPricing: () => Promise<PricingRow[]>
   updatePricing: (rows: PricingRow[]) => Promise<PricingRow[]>
   resetPricing: () => Promise<PricingRow[]>

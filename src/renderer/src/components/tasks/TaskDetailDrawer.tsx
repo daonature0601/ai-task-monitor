@@ -6,6 +6,7 @@ import {
   formatCost,
   formatDuration,
   formatRate,
+  formatEventTime,
   formatTaskCost,
   formatTimeFull,
   formatTokens,
@@ -221,7 +222,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
                       className="flex items-center justify-between rounded-lg border border-white/[0.045] bg-white/[0.02] px-2.5 py-1.5"
                     >
                       <span className="num text-caption text-fg-lo">
-                        {new Date(event.ts).toLocaleTimeString('zh-CN', { hour12: false })}
+                        {formatEventTime(event.ts)}
                       </span>
                       <span className="num text-caption text-fg-mid">
                         in {formatTokens(event.inputTokens)} · out {formatTokens(event.outputTokens)} · cache{' '}

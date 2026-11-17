@@ -22,6 +22,8 @@ export function Adapters(): JSX.Element {
   const notify = useMonitor((s) => s.notify)
   const [bridge, setBridge] = useState<BridgeStatus | null>(null)
   const [busy, setBusy] = useState(false)
+  const [rebuilding, setRebuilding] = useState(false)
+  const [rebuildDays, setRebuildDays] = useState(30)
 
   useEffect(() => {
     window.monitor
@@ -44,6 +46,28 @@ export function Adapters(): JSX.Element {
     setBridge(status)
     notify('已重新扫描全部数据源')
     setBusy(false)
+  }
+
+  const rebuild = async (): Promise<void> => {
+    const ok = window.confirm(
+      `将清空任务与用量流水，并按最近 ${rebuildDays} 天重新扫描日志。\n\n` +
+        '设置与价目表不受影响；扫描期间数据会短暂为空，完成后自动恢复。\n' +
+        `日志体积较大时可能需要数分钟。确认继续？`
+    )
+    if (!ok) return
+
+    setRebuilding(true)
+    try {
+      await window.monitor.rebuildHistory(rebuildDays)
+      const next = await window.monitor.getAdapters()
+      setAdapters(next)
+      notify(`已按最近 ${rebuildDays} 天重建，扫描在后台继续，数据会逐步恢复`)
+    } catch (error) {
+      console.error('[adapters] rebuild failed', error)
+      notify('重建失败，请查看主进程日志')
+    } finally {
+      setRebuilding(false)
+    }
   }
 
   const copyScript = async (tool: 'yuanbao' | 'deepseek-harness'): Promise<void> => {
@@ -215,6 +239,46 @@ export function Adapters(): JSX.Element {
             chat.deepseek.com），限制 64KB 请求体与 30 次/秒；脚本不会读取或上传任何对话正文，只上报 token 计数。
           </p>
         </div>
+      </Card>
+
+      <Card>
+        <SectionTitle
+          title="数据维护"
+          hint="任务与用量流水都由日志派生，可安全重建；设置与价目表不受影响"
+        />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-caption text-fg-lo">回填窗口</span>
+            <select
+              value={rebuildDays}
+              onChange={(event) => setRebuildDays(Number(event.target.value))}
+              className="field h-[28px] w-[92px] px-2 py-0 text-caption"
+            >
+              <option value={7}>7 天</option>
+              <option value={30}>30 天</option>
+              <option value={90}>90 天</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            disabled={rebuilding}
+            onClick={() => void rebuild()}
+            className="btn h-[28px]"
+          >
+            <Waves size={13} />
+            <span className="text-caption">{rebuilding ? '重建中…' : '重建历史索引'}</span>
+          </button>
+          <span className="text-caption text-fg-lo">
+            选择窗口后点击重建；扫描期间数据会短暂为空
+          </span>
+        </div>
+
+        <p className="mt-2 text-[10px] leading-relaxed text-fg-lo">
+          重建会删除 `tasks` / `usage_events` / `file_cursors` 三张表并按所选窗口重扫日志。
+          耗时与日志体积成正比：本机 Codex 日志约 15GB（覆盖 5 个月），30 天约需 1–3 分钟，
+          期间概览会短暂变空，扫描完成后数字自动回来。
+        </p>
       </Card>
     </div>
   )

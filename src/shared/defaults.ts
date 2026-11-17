@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   alertDurationDangerMs: 120 * 60_000,
   alertCacheHitMinRate: 0.3,
   retentionDays: 90,
+  backfillDays: 7,
   eventsCostVersion: 0,
   launchAtLogin: false,
   bridgeEnabled: true,

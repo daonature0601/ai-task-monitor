@@ -1,4 +1,4 @@
-import { promises as fsp } from 'node:fs'
+import { promises as fsp, closeSync, openSync, readSync } from 'node:fs'
 import { basename, join, relative } from 'node:path'
 import type { AdapterCapabilities, ToolId } from '@shared/types'
 import type { AdapterContext } from '../base'
@@ -38,7 +38,7 @@ export class CodexAdapter extends BaseAdapter {
   }
 
   private tailer: JsonlTailer | null = null
-  private readonly metaLoading = new Set<string>()
+  private readonly lastBeat = new Map<string, number>()
   private readonly sessions = new Map<string, SessionMeta>()
   private readonly totals = new Map<string, CodexTotals>()
   /** guardian_review 线程：内部审查，不计入任务 */
@@ -64,7 +64,7 @@ export class CodexAdapter extends BaseAdapter {
       glob: '**/rollout-*.jsonl',
       depth: 6,
       debounceMs: ctx.settings().fileDebounceMs,
-      backfillDays: 7,
+      backfillDays: ctx.settings().backfillDays,
       maxBytesPerRead: 4 * 1024 * 1024,
       cursors: ctx.cursors,
       onLine: (line, meta) => this.handleLine(line, meta),
@@ -165,9 +165,13 @@ export class CodexAdapter extends BaseAdapter {
       return
     }
 
-    // 会话元信息只在文件首行；进程重启后游标已在末尾，不会再读到它，
-    // 这里按需回读文件头补齐标题 / 工作区 / 模型。
-    this.ensureMeta(meta)
+    // 会话元信息只在文件首行；进程重启后游标已在末尾，不会再读到它。
+    // 必须**同步**补齐：若异步加载，首个 token_count 会先用文件名兜底成子会话 id，
+    // 导致子代理被拆成独立任务（且父子关系丢失）。
+    this.ensureMetaSync(meta)
+    // 元信息加载后可能刚判定为 guardian 线程，必须立刻退出，
+    // 否则文件追加的心跳仍会为它建立任务。
+    if (this.skipped.has(meta.relPath)) return
     const session = this.sessions.get(meta.relPath) ?? this.fallbackSession(meta.relPath)
     this.sessions.set(meta.relPath, session)
 
@@ -175,35 +179,78 @@ export class CodexAdapter extends BaseAdapter {
       session.model = payload.model
     }
 
+    this.beat(session, meta.relPath, meta.mtimeMs)
+
     if (type === 'event_msg' && payload && payload.type === 'token_count') {
       // 使用原始事件时间，避免把历史会话误判为"刚刚发生"
       this.handleTokenCount(payload, session, meta, parseTs(obj.timestamp))
     }
   }
 
-  /** 惰性回读文件头，仅在内存中没有该会话元信息时触发一次 */
-  private ensureMeta(meta: LineContext): void {
-    if (this.sessions.has(meta.relPath) || this.metaLoading.has(meta.relPath)) return
-    this.metaLoading.add(meta.relPath)
-    void readAllLines(meta.filePath, 32 * 1024)
-      .then((lines) => {
-        for (const line of lines) {
-          let obj: Record<string, unknown>
-          try {
-            obj = JSON.parse(line) as Record<string, unknown>
-          } catch {
-            continue
-          }
-          if (obj.type !== 'session_meta') continue
-          const payload = isRecord(obj.payload) ? obj.payload : null
-          if (payload) this.handleSessionMeta(payload, meta)
-          break
+  /**
+   * 同步回读文件头的 session_meta（仅 32KB，首次遇到该文件时执行一次）。
+   * 用同步 IO 是为了保证「父子线程 / guardian 判定」先于任何用量事件生效。
+   */
+  private ensureMetaSync(meta: LineContext): void {
+    if (this.sessions.has(meta.relPath) || this.skipped.has(meta.relPath)) return
+    let fd: number | null = null
+    try {
+      fd = openSync(meta.filePath, 'r')
+      const buffer = Buffer.allocUnsafe(32 * 1024)
+      const bytes = readSync(fd, buffer, 0, buffer.length, 0)
+      const head = buffer.subarray(0, bytes).toString('utf8')
+      for (const line of head.split('\n')) {
+        const raw = line.trim()
+        if (!raw) continue
+        let obj: Record<string, unknown>
+        try {
+          obj = JSON.parse(raw) as Record<string, unknown>
+        } catch {
+          // 首行被截断时跳过；下一次追加会再尝试
+          continue
         }
-      })
-      .catch((error: unknown) => {
-        this.metaLoading.delete(meta.relPath)
-        console.error('[adapter:codex] read session meta failed', error)
-      })
+        if (obj.type !== 'session_meta') continue
+        const payload = isRecord(obj.payload) ? obj.payload : null
+        if (payload) this.handleSessionMeta(payload, meta)
+        return
+      }
+    } catch (error) {
+      console.error('[adapter:codex] read session meta failed', meta.relPath, error)
+    } finally {
+      if (fd !== null) {
+        try {
+          closeSync(fd)
+        } catch {
+          // 忽略关闭失败
+        }
+      }
+    }
+  }
+
+  /**
+   * 活动心跳：Codex 只在回合结束才写 token_count，长回合里 90 秒无事件就会
+   * 被误判为「静默」。文件一旦有追加就刷新活跃度（每 30 秒合并一次，
+   * 不计入用量流水、不改 tokensSource）。
+   */
+  private beat(session: SessionMeta, relPath: string, mtimeMs: number): void {
+    // 只有「文件此刻仍在被写入」才算活跃；历史回填时不能伪造"正在运行"，
+    // 否则每个旧会话都会凭空多出一个 0 事件的任务。
+    if (Date.now() - mtimeMs > 180_000) return
+    const bucket = Math.floor(Date.now() / 30_000)
+    if (this.lastBeat.get(relPath) === bucket) return
+    this.lastBeat.set(relPath, bucket)
+    this.push({
+      tool: this.id,
+      externalSessionId: session.sessionId,
+      ts: Date.now(),
+      title: session.cwd ? basename(session.cwd) : undefined,
+      workspace: session.cwd,
+      model: session.model,
+      tokensSource: 'unavailable',
+      skipEventLog: true,
+      dedupeKey: `beat:${relPath}:${bucket}`,
+      ...emptyUsage()
+    })
   }
 
   private handleSessionMeta(payload: Record<string, unknown>, meta: LineContext): void {

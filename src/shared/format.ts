@@ -90,6 +90,20 @@ export function formatTimeFull(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+/**
+ * 事件时间：带日期消歧。
+ * 合并子代理后，同一个任务里可能出现跨天的事件，
+ * 只显示时分秒会让人误以为是"未来的时间"。
+ */
+export function formatEventTime(ts: number, now = Date.now()): string {
+  const d = new Date(ts)
+  const hms = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  const today = startOfDay(now)
+  if (ts >= today) return hms
+  if (ts >= today - 86_400_000) return `昨天 ${hms}`
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hms}`
+}
+
 export function formatTimeShort(ts: number, now = Date.now()): string {
   const d = new Date(ts)
   const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`

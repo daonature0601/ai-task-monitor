@@ -101,6 +101,11 @@ export function registerIpcHandlers(runtime: Runtime): void {
     return next
   })
 
+  ipcMain.handle(IPC.settingsRebuild, async (_event, days: unknown) => {
+    const window = typeof days === 'number' && Number.isFinite(days) ? days : 30
+    return runtime.rebuildHistory(window)
+  })
+
   ipcMain.handle(IPC.pricingGet, () => runtime.getPricing())
   ipcMain.handle(IPC.pricingUpdate, (_event, rows: unknown) => {
     const list = Array.isArray(rows) ? (rows as PricingRow[]) : []

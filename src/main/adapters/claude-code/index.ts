@@ -52,7 +52,7 @@ export class ClaudeCodeAdapter extends BaseAdapter {
       glob: '**/*.jsonl',
       depth: 4,
       debounceMs: ctx.settings().fileDebounceMs,
-      backfillDays: 7,
+      backfillDays: ctx.settings().backfillDays,
       maxBytesPerRead: 4 * 1024 * 1024,
       cursors: ctx.cursors,
       onLine: (line, meta) => this.handleLine(line, meta),

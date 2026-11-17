@@ -151,6 +151,26 @@ describe('TaskMachine 计费与汇总', () => {
     expect(task.durationMs).toBeGreaterThanOrEqual(10 * 60_000)
   })
 
+  it('历史回填事件不会污染当前活动段', () => {
+    const machine = makeMachine()
+    const now = Date.now()
+    machine.ingest(delta({ ts: now, dedupeKey: 'live' }))
+    const liveId = machine.list()[0].id
+
+    // 合并进来的子代理可能在昨天写过日志，这些事件必须单独归入历史任务
+    machine.ingest(delta({ ts: now - 20 * 3_600_000, inputTokens: 500, dedupeKey: 'old' }))
+
+    const tasks = machine.list()
+    const live = tasks.find((task) => task.id === liveId)
+    const backfill = tasks.find((task) => task.id !== liveId)
+
+    expect(live?.inputTokens).toBe(1000)
+    expect(live?.eventCount).toBe(1)
+    expect(backfill?.inputTokens).toBe(500)
+    expect(backfill?.status).toBe('ended')
+    expect(backfill?.id).toContain('~h')
+  })
+
   it('汇总只统计当天启动的任务', () => {
     const machine = makeMachine()
     machine.ingest(delta({ ts: Date.now() }))

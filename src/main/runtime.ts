@@ -60,6 +60,11 @@ export interface Runtime {
   getTaskDetail: (id: string) => TaskDetail | null
   getStats: (from: number, to: number) => StatsPayload
   bridgeStatus: () => BridgeStatus
+  /**
+   * 重建历史索引：清空派生的任务/流水表与读取游标，按指定天数重新扫描日志。
+   * 用于恢复因回填窗口过小而未导入的历史数据。
+   */
+  rebuildHistory: (days: number) => Promise<AppSettings>
   shutdown: () => Promise<void>
 }
 
@@ -242,6 +247,26 @@ export function createRuntime(
     },
     getStats: (from, to) => buildStats(db, from, to),
     bridgeStatus: () => bridge.status(),
+
+    rebuildHistory: async (days) => {
+      const window = Math.min(Math.max(Math.round(days) || 7, 1), 365)
+      console.log(`[rebuild] 开始重建，回填窗口 ${window} 天`)
+      scheduler.stop()
+      await adapters.stopAll()
+      // 任务与流水都是日志的派生数据，可以安全重建；
+      // 设置与价目表属于用户配置，不动。
+      db.prepare('DELETE FROM usage_events').run()
+      db.prepare('DELETE FROM tasks').run()
+      db.prepare('DELETE FROM file_cursors').run()
+      machine.reset()
+      settings = writeSettings(db, { backfillDays: window })
+      await adapters.startAll()
+      scheduler.start()
+      publish(true)
+      console.log('[rebuild] 适配器已按新窗口重启扫描')
+      return settings
+    },
+
     shutdown: async () => {
       scheduler.stop()
       await adapters.stopAll()

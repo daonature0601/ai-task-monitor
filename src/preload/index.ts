@@ -22,6 +22,7 @@ const api: MonitorApi = {
   rescanAdapters: () => ipcRenderer.invoke(IPC.adaptersRescan),
   getSettings: () => ipcRenderer.invoke(IPC.settingsGet),
   updateSettings: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch),
+  rebuildHistory: (days) => ipcRenderer.invoke(IPC.settingsRebuild, days),
   getPricing: () => ipcRenderer.invoke(IPC.pricingGet),
   updatePricing: (rows) => ipcRenderer.invoke(IPC.pricingUpdate, rows),
   resetPricing: () => ipcRenderer.invoke(IPC.pricingReset),
