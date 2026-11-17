@@ -7,6 +7,12 @@ import { BaseAdapter, emptyUsage, type DetectResult } from '../base'
 import { JsonlTailer, type LineContext } from '../../collectors/jsonl-tailer'
 import { TOOL_PATHS, appSupportDir, firstExisting } from '../../collectors/paths'
 import { isInstalled } from '../../collectors/process-probe'
+import {
+  listCbIdeConversations,
+  readCbIdeProjects,
+  readCbIdeRequests,
+  readCbIdeTitles
+} from '../../collectors/codebuddy-ide'
 
 /**
  * CodeBuddy 适配器。
@@ -26,6 +32,12 @@ export class CodeBuddyAdapter extends BaseAdapter {
 
   private tailer: JsonlTailer | null = null
   private activityTimer: NodeJS.Timeout | null = null
+  private ideTimer: NodeJS.Timeout | null = null
+  /** 会话索引文件 → 上次处理的 mtime，避免重复解压/解析 */
+  private readonly ideMtime = new Map<string, number>()
+  /** convId → 项目名 */
+  private ideProjects = new Map<string, string>()
+  private ideProjectsAt = 0
   /** 上一轮仍然活跃的对话 id，用于发结束信号 */
   private activeSessions = new Set<string>()
   private readonly models = new Map<string, string>()
@@ -66,7 +78,109 @@ export class CodeBuddyAdapter extends BaseAdapter {
     }
     poll()
     this.activityTimer = setInterval(poll, Math.max(3000, ctx.settings().processProbeMs))
-    console.log('[adapter:codebuddy] started (jsonl + activity)')
+    const scanIde = (): void => {
+      void this.scanIde(ctx).catch((error) => this.fail(error, '读取 IDE 会话索引失败'))
+    }
+    scanIde()
+    this.ideTimer = setInterval(scanIde, 30_000)
+    console.log('[adapter:codebuddy] started (jsonl + activity + ide-index)')
+  }
+
+  /**
+   * CodeBuddy IDE（桌面端 / JetBrains 插件）不写 JSONL，用量在
+   * CodeBuddyExtension/Data/<账号>/<IDE>/<账号>/history/<ws>/<convId>/index.json
+   * 的 requests[].usage。该方法按文件 mtime + 已处理的最大时间戳增量导入。
+   */
+  private async scanIde(ctx: AdapterContext): Promise<void> {
+    if (ctx.isPaused()) return
+    const dataRoot = join(appSupportDir(), 'CodeBuddyExtension', 'Data')
+    const conversations = await listCbIdeConversations(dataRoot)
+    if (conversations.length === 0) return
+
+    // 项目映射变动很少，5 分钟刷新一次
+    if (Date.now() - this.ideProjectsAt > 300_000) {
+      this.ideProjects = await readCbIdeProjects(
+        join(
+          appSupportDir(),
+          'CodeBuddy CN',
+          'User',
+          'globalStorage',
+          'tencent-cloud.coding-copilot',
+          'genie-history'
+        )
+      )
+      this.ideProjectsAt = Date.now()
+    }
+
+    const titlesByWs = new Map<string, Map<string, string>>()
+
+    for (const conversation of conversations) {
+      if (this.ideMtime.get(conversation.filePath) === conversation.mtimeMs) continue
+      this.ideMtime.set(conversation.filePath, conversation.mtimeMs)
+
+      let titles = titlesByWs.get(conversation.workspaceIndex)
+      if (!titles) {
+        titles = await readCbIdeTitles(conversation.workspaceIndex)
+        titlesByWs.set(conversation.workspaceIndex, titles)
+      }
+
+      const requests = await readCbIdeRequests(conversation)
+      if (requests.length === 0) continue
+
+      // 最后一条请求没有后续请求可参照，用文件 mtime 作为这一轮的结束
+      const last = requests[requests.length - 1]
+      if (!last.endTs || last.endTs < last.ts) last.endTs = conversation.mtimeMs
+
+      const cursorKey = `cbide:${conversation.filePath}`
+      const cursor = ctx.cursors.get(cursorKey)
+      const since = cursor?.offset ?? 0
+      const title = titles.get(conversation.conversationId)
+      const project = this.ideProjects.get(conversation.conversationId)
+
+      for (const request of requests) {
+        if (request.ts <= since) continue
+        this.push({
+          tool: this.id,
+          externalSessionId: conversation.conversationId,
+          ts: request.ts,
+          title,
+          project,
+          authoritativeTitle: Boolean(title),
+          inputTokens: request.usage.input,
+          outputTokens: request.usage.output,
+          cacheReadTokens: request.usage.cacheRead,
+          cacheWriteTokens: request.usage.cacheWrite,
+          reasoningTokens: 0,
+          tokensSource: 'native',
+          // IDE 的一次对话就是一个任务，跨天也不拆；
+          // 每次请求都是一轮问答，用它刷新「本轮开始」
+          keepSession: true,
+          turnStart: true,
+          dedupeKey: `cbide:${conversation.conversationId}:${request.requestId}`
+        })
+      }
+
+      // 本轮结束：给最后一条请求补 turnEnd，否则已结束任务的耗时恒为 0
+      if (last.endTs > last.ts) {
+        this.push({
+          tool: this.id,
+          externalSessionId: conversation.conversationId,
+          ts: last.endTs,
+          title,
+          project,
+          authoritativeTitle: Boolean(title),
+          tokensSource: 'unavailable',
+          skipEventLog: true,
+          turnEnd: true,
+          keepSession: true,
+          dedupeKey: `cbide:end:${conversation.conversationId}:${last.requestId}`,
+          ...emptyUsage()
+        })
+      }
+
+      const maxTs = Math.max(requests[requests.length - 1].ts, last.endTs)
+      ctx.cursors.set(cursorKey, Math.max(since, maxTs), null, conversation.mtimeMs)
+    }
   }
 
   /**
@@ -122,7 +236,7 @@ export class CodeBuddyAdapter extends BaseAdapter {
       alive.add(conversationId)
       this.emitState({
         tool: this.id,
-        sessionId: `cb-${conversationId}`,
+        sessionId: conversationId,
         phase: 'active',
         ts: updatedAt,
         source: 'io',
@@ -137,7 +251,7 @@ export class CodeBuddyAdapter extends BaseAdapter {
       if (alive.has(id)) continue
       this.emitState({
         tool: this.id,
-        sessionId: `cb-${id}`,
+        sessionId: id,
         phase: 'end',
         ts: now,
         source: 'io'
@@ -151,6 +265,8 @@ export class CodeBuddyAdapter extends BaseAdapter {
     this.tailer = null
     if (this.activityTimer) clearInterval(this.activityTimer)
     this.activityTimer = null
+    if (this.ideTimer) clearInterval(this.ideTimer)
+    this.ideTimer = null
   }
 
   private handleLine(line: string, meta: LineContext): void {

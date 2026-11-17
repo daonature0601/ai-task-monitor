@@ -21,9 +21,24 @@ export interface SnapshotInput {
  * 构建推送给界面/托盘的快照：
  * 只包含运行中、空闲任务与最近 40 条已结束任务，避免长历史撑大 IPC 载荷。
  */
+/** 零时长且已结束 = 只有回合信号、没有实际推进的空回合 */
+export function isEmptyRound(task: {
+  status: string
+  turnStartedAt: number
+  turnEndedAt?: number
+  endedAt?: number
+  lastEventAt: number
+}): boolean {
+  if (task.status !== 'ended') return false
+  const end = task.turnEndedAt ?? task.endedAt ?? task.lastEventAt
+  return end <= task.turnStartedAt
+}
+
 export function buildSnapshot(input: SnapshotInput): SnapshotPayload {
   const now = input.now ?? Date.now()
-  const all = input.machine.list()
+  // 零长度的已结束任务（只有回合开始信号、没有任何推进）在列表里没有信息量，
+  // 直接隐藏；它们可能仍带着历史 token，但用量统计走 usage_events，不受影响。
+  const all = input.machine.list().filter((task) => !isEmptyRound(task))
   const live = all.filter((t) => t.status !== 'ended')
   const recentEnded = all.filter((t) => t.status === 'ended').slice(0, 40)
   const tasks = [...live, ...recentEnded]

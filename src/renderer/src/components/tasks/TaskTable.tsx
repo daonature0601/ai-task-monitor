@@ -15,7 +15,7 @@ import { cn, statusTone, toolName } from '../../lib/utils'
 import { StatusDot, ToolAvatar } from '../ui/atoms'
 
 const COLUMNS = [
-  { key: 'task', label: '任务', className: 'min-w-[220px]' },
+  { key: 'task', label: '任务', className: 'w-[38%]' },
   { key: 'tool', label: '工具', className: 'w-[128px]' },
   { key: 'start', label: '本轮开始', className: 'w-[112px]' },
   { key: 'duration', label: '本轮耗时', className: 'w-[96px]' },
@@ -41,7 +41,7 @@ export function TaskTable({
 }): JSX.Element {
   return (
     <div className="overflow-hidden rounded-xl border border-white/[0.05]">
-      <table className="w-full border-collapse text-body">
+      <table className="w-full table-fixed border-collapse text-body">
         <thead>
           <tr className="bg-white/[0.025]">
             {COLUMNS.map((col) => (

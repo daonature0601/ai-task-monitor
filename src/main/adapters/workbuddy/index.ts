@@ -30,7 +30,6 @@ export class WorkBuddyAdapter extends BaseAdapter {
   }
 
   private tailer: JsonlTailer | null = null
-  private heartbeatTimer: NodeJS.Timeout | null = null
   private readonly titles = new Map<string, string>()
 
   async detect(): Promise<DetectResult> {
@@ -64,22 +63,15 @@ export class WorkBuddyAdapter extends BaseAdapter {
       await this.tailer.start()
     }
 
-    const heartbeatDir = join(homePath('.workbuddy'), 'sessions')
-    const beat = (): void => {
-      void this.pollSessionHeartbeats(heartbeatDir, 'WorkBuddy').catch((error) =>
-        this.fail(error, '读取会话心跳失败')
-      )
-    }
-    beat()
-    this.heartbeatTimer = setInterval(beat, Math.max(3000, ctx.settings().processProbeMs))
-    console.log('[adapter:workbuddy] started (jsonl + heartbeat)')
+    // 心跳文件是**进程存活**信号（prewarm 池会一次生成多个），
+    // 用它建任务会出现「同一对话多张卡片」，因此不再接入。
+    // 状态由 JSONL 的用量/轮次事件驱动。
+    console.log('[adapter:workbuddy] started (jsonl)')
   }
 
   protected async onStop(): Promise<void> {
     await this.tailer?.stop()
     this.tailer = null
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
-    this.heartbeatTimer = null
   }
 
   /** 子代理文件按路径归属父会话，避免一个会话裂成多条任务 */
@@ -173,6 +165,8 @@ export class WorkBuddyAdapter extends BaseAdapter {
           authoritativeTitle: true,
           tokensSource: 'unavailable',
           skipEventLog: true,
+          // 与 Codex / DSH 一致：一轮结束即结算任务；
+          // 用户在 10 分钟内追问会重开同一任务，不会碎成多条
           turnEnd: true,
           endSignal: true,
           dedupeKey: `wb:end:${sessionId}:${str(obj.id) ?? ts}`,

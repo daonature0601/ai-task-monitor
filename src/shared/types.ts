@@ -68,6 +68,8 @@ export interface UsageDelta extends TokenUsage {
   startedAtHint?: number
   /** 仅用于维持活跃度、无需写入用量流水（如每 30s 的心跳） */
   skipEventLog?: boolean
+  /** 长间隔也视为同一会话（IDE 类数据源，一次对话就是一个任务） */
+  keepSession?: boolean
   /** 当次问答（turn）开始：用户提交新问题 */
   turnStart?: boolean
   /** 当次问答结束：工具完成本轮回复 */

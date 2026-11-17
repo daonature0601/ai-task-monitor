@@ -197,6 +197,9 @@ export function queryTasks(
     where.push('started_at <= @to')
     params.to = query.to
   }
+  // 与快照保持一致的过滤：零时长的已结束任务不进入列表
+  where.push("NOT (status = 'ended' AND COALESCE(turn_ended_at, ended_at, last_event_at, turn_started_at) <= turn_started_at)")
+
   if (query.keyword && query.keyword.trim()) {
     where.push('(title LIKE @kw OR project LIKE @kw OR workspace LIKE @kw OR model LIKE @kw OR external_session_id LIKE @kw)')
     params.kw = `%${query.keyword.trim()}%`
