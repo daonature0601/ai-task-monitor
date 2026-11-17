@@ -26,6 +26,8 @@ export interface JsonlTailerOptions {
   backfillDays: number
   maxBytesPerRead: number
   cursors: CursorStore
+  /** 兜底轮询间隔（毫秒）：watcher 静默时主动 stat 检查是否有新数据，默认 60s */
+  fallbackSweepMs?: number
   onLine: (line: string, ctx: LineContext) => void
   onError?: (error: unknown, filePath?: string) => void
 }
@@ -41,6 +43,9 @@ export class JsonlTailer {
   private readonly pending = new Map<string, NodeJS.Timeout>()
   private readonly busy = new Set<string>()
   private stopped = false
+  private sweepTimer: NodeJS.Timeout | null = null
+  /** 最近一次读取时间：用于判断 watcher 是否仍在工作 */
+  private lastReadAt = 0
 
   constructor(private readonly options: JsonlTailerOptions) {}
 
@@ -63,6 +68,13 @@ export class JsonlTailer {
     this.watcher.on('error', (error) => this.options.onError?.(error))
 
     await this.initialScan()
+
+    // 兜底：chokidar 可能因高频事件或系统限制而停止回调，
+    // 定时 stat 一次已知文件，发现 size > cursor 就主动补读，避免永久停摆。
+    const interval = this.options.fallbackSweepMs ?? 60_000
+    this.sweepTimer = setInterval(() => {
+      void this.sweep()
+    }, interval)
   }
 
   private async initialScan(): Promise<void> {
@@ -122,6 +134,7 @@ export class JsonlTailer {
   }
 
   private async readFile(filePath: string): Promise<void> {
+    this.lastReadAt = Date.now()
     if (this.busy.has(filePath) || this.stopped) return
     this.busy.add(filePath)
     try {
@@ -195,8 +208,43 @@ export class JsonlTailer {
     return lineStart
   }
 
+  /**
+   * 兜底轮询：只 stat 文件并与游标比对，不做全量解析。
+   * 若最近 1 分钟内有正常读取（watcher 仍工作），本轮直接跳过。
+   */
+  private async sweep(): Promise<void> {
+    if (this.stopped) return
+    if (Date.now() - this.lastReadAt < 60_000) return
+
+    for (const root of this.options.roots.filter(Boolean)) {
+      let files: string[]
+      try {
+        files = await this.walk(root, this.options.depth)
+      } catch (error) {
+        this.options.onError?.(error)
+        continue
+      }
+      for (const file of files) {
+        if (this.stopped || this.busy.has(file)) continue
+        try {
+          const stat = await fsp.stat(file)
+          const cursor = this.options.cursors.get(file)
+          const offset = cursor?.offset ?? 0
+          if (stat.size > offset) {
+            console.log('[tailer] fallback sweep re-read', basename(file), '+' + (stat.size - offset) + 'B')
+            await this.readFile(file)
+          }
+        } catch {
+          // 单文件失败不影响整轮
+        }
+      }
+    }
+  }
+
   async stop(): Promise<void> {
     this.stopped = true
+    if (this.sweepTimer) clearInterval(this.sweepTimer)
+    this.sweepTimer = null
     for (const timer of this.pending.values()) clearTimeout(timer)
     this.pending.clear()
     if (this.watcher) {
