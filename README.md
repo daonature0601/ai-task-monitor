@@ -139,6 +139,50 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 - 清空 `file_cursors` 可强制重扫（会重新产生事件，幂等键保证不重复计费）
 - 事件时间统一显示为：今天 `11:07:21`、昨天 `昨天 16:53:33`、更早 `11-16 16:53:33` —— **必须带日期**，否则跨天任务的时间线会让人误以为时间错乱
 
+### 3.3 任务状态：运行时信号驱动
+
+**状态不来自日志解析。** `running / idle / ended` 由工具自己的运行时事件决定，日志只负责 token 与费用。
+
+采集链路：
+
+```
+工具 hook / 心跳文件 / 文件写入 / 桥接脚本
+        ↓  追加一行 JSON
+<userData>/monitor/state/inbox.jsonl
+        ↓  字节游标增量读取
+TaskMachine.applyState()  →  状态 + state_source 落库
+```
+
+`TaskMachine` 的职责是分开的：`ingest()` 只累加 token / 费用 / 标题，`applyState()` 只迁移状态。日志里有新事件**不会**把任务改成运行中。
+
+**来源分级（只升不降）**
+
+| 来源 | 权重 | 含义 | 典型场景 |
+| --- | --- | --- | --- |
+| `hook` | 5 | 工具钩子主动上报 | Claude Code UserPromptSubmit / Stop |
+| `bridge` | 4 | 网页脚本显式上报 | 元宝、DeepSeek Harness |
+| `io` | 3 | 会话文件此刻仍在追加 | Codex / Claude Code 回合进行中 |
+| `heartbeat` | 2 | `<pid>.json` 心跳 | CodeBuddy / WorkBuddy |
+| `process` | 1 | 进程存在 | Cursor 等无钩子工具 |
+| `none` | 0 | 没有任何运行时通道 | 仅作兜底，界面标记为「推断」 |
+
+一旦出现更高权重的信号，不会被低权重信号降级。任务详情里的 `state_source` 就是这条记录。
+
+**状态挂钩安装（适配器页 →「状态挂钩」）**
+
+| 工具 | 注入位置 | 覆盖阶段 | 备注 |
+| --- | --- | --- | --- |
+| Claude Code | `~/.claude/settings.json` 的 `hooks` | 回合开始 / 结束 / 工具调用 | 写入前备份为 `settings.json.atm-backup` |
+| Codex | `~/.codex/config.toml` 的 `notify` | 仅回合结束 | 链式接管：原 notify 命令仍会被转调，原值存于 `codex-origin.json` |
+
+点击「移除挂钩」会把两个配置文件还原。钩子脚本本身是 `<userData>/monitor/hooks/atm-hook.cjs`，无依赖、只上报 `sessionId / phase / cwd`，不读取任何对话内容，异常一律吞掉并以 0 退出。
+
+**TTL 规则**
+
+- `running → idle`：距上次**状态信号**超过 `idleThresholdMs`（默认 90s）
+- `idle → ended`：超过 `max(idle×20, 30min)`
+- `state_source = none` 时不做运行态推断，只把早已无信号的历史任务收尾
+
 ---
 
 ## 4. 价目表可信度
@@ -221,6 +265,9 @@ adapters（7 个采集器）
 6. **未知/待确认模型不计价**：费用列显示 `—`，需在设置页补录单价并标记「已核实」后才会计算。
 7. **Codex 无 API token 单价**：任务时长与 token 完整，但费用为 `—`，除非手动补录订阅折算价。
 8. **心跳通道只有时长**：CodeBuddy / WorkBuddy 的 `<pid>.json` 心跳不含 token，这类任务固定标 `unavailable`。
+9. **CodeBuddy 纯聊天任务无法判定运行中**：桌面端没有 hook，会话级信号只有 `edit-sessions/<conversationId>.json` 的 `updatedAt`，它仅在产生文件编辑时刷新；只问答不改文件的任务拿不到运行态。
+10. **Codex 没有「开始」事件**：官方 `notify` 只提供回合结束（且常被其它工具占用）。因此开始依赖 `io`（文件写入），结束可精确到 hook。
+11. **Cursor 只有进程级状态**：无 hook、无心跳，只能判断应用是否打开，无法区分「开着但在看代码」与「正在跑任务」。
 
 ---
 
@@ -231,13 +278,15 @@ src/shared     types / ipc-contract / format / defaults（前后端共用）
 src/main       index / window / tray / runtime / ipc
   ├ core       task-machine / pricing / alerts / scheduler / snapshot / batch-writer
   ├ adapters   7 个工具适配器 + base + registry
-  ├ collectors jsonl-tailer / sqlite-reader / leveldb-reader / process-probe / paths
+  ├ collectors jsonl-tailer / state-inbox / sqlite-reader / leveldb-reader / process-probe / paths
+  ├ hooks      注入工具的钩子脚本模板 + 安装/还原
   ├ bridge     server + 用户脚本模板
+  ├ dev        smoke（自检与探针，动态加载，不进生产包）
   └ db         migrations + repositories
 src/preload    contextBridge 白名单 API
 src/renderer   React 18 + Tailwind + Recharts + Zustand（概览/任务/统计/适配器/设置）
 tests          纯函数与状态机单测
-scripts        setup-native / generate-icon
+scripts        setup-native / generate-icon / after-pack
 ```
 
 ---
