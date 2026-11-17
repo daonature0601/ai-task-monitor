@@ -1,6 +1,7 @@
 import type { Currency, TaskSnapshot } from '@shared/types'
 import {
   formatDuration,
+  turnElapsed,
   formatRate,
   formatTaskCost,
   formatTimeShort,
@@ -58,7 +59,7 @@ export function TaskTable({
         <tbody>
           {tasks.map((task, index) => {
             const live = task.status !== 'ended'
-            const elapsed = task.status === 'running' ? now - task.startedAt : task.durationMs
+            const elapsed = turnElapsed(task, now)
             const danger = task.alerts.includes('cost_danger')
             return (
               <tr

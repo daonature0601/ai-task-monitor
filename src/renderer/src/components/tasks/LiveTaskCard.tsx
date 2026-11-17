@@ -5,6 +5,7 @@ import {
   formatRate,
   formatTaskCost,
   formatTimeShort,
+  turnElapsed,
   formatTokens,
   STATUS_HINT,
   STATUS_LABEL
@@ -26,7 +27,8 @@ export function LiveTaskCard({
   onOpen: (id: string) => void
 }): JSX.Element {
   const running = task.status === 'running'
-  const elapsed = running ? now - task.startedAt : task.durationMs
+  // 展示「当次问答」的时长与开始时间，而不是整段会话
+  const elapsed = turnElapsed(task, now)
   const danger = task.alerts.includes('cost_danger') || task.alerts.includes('duration_danger')
   const warn = task.alerts.includes('cost_warn') || task.alerts.includes('duration_warn')
 
@@ -105,7 +107,7 @@ export function LiveTaskCard({
       </div>
 
       <div className="mt-3 flex items-center justify-between text-caption text-fg-lo">
-        <span className="num">开始 {formatTimeShort(task.startedAt)}</span>
+        <span className="num">本轮开始 {formatTimeShort(task.turnStartedAt ?? task.startedAt)}</span>
         <div className="flex items-center gap-1.5">
           {task.tokensSource !== 'native' && (
             <Badge tone={task.tokensSource === 'unavailable' ? 'neutral' : 'warn'}>

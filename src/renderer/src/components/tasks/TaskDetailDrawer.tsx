@@ -6,6 +6,7 @@ import {
   formatCost,
   formatDuration,
   formatRate,
+  turnElapsed,
   formatEventTime,
   formatTaskCost,
   formatTimeFull,
@@ -78,11 +79,8 @@ export function TaskDetailDrawer(): JSX.Element | null {
 
   if (!taskId) return null
 
-  const elapsed = task
-    ? task.status === 'running'
-      ? now - task.startedAt
-      : task.durationMs
-    : 0
+  // 时间口径：展示当次问答，而不是整段会话
+  const elapsed = task ? turnElapsed(task, now) : 0
 
   const totalTokens = task
     ? task.inputTokens + task.outputTokens + task.cacheReadTokens + task.cacheWriteTokens
@@ -138,8 +136,13 @@ export function TaskDetailDrawer(): JSX.Element | null {
           ) : task ? (
             <div className="space-y-5">
               <div className="grid grid-cols-2 gap-2">
-                <Metric label="开始时间" value={formatTimeFull(task.startedAt)} mono />
-                <Metric label="已执行" value={formatDuration(elapsed)} mono />
+                <Metric label="本轮开始" value={formatTimeFull(task.turnStartedAt ?? task.startedAt)} mono />
+                <Metric
+                  label="本轮耗时"
+                  value={formatDuration(elapsed)}
+                  mono
+                  hint={task.status === 'ended' ? '本轮回复已结束' : undefined}
+                />
                 <Metric label="输入 Token" value={formatTokensFull(task.inputTokens)} mono />
                 <Metric label="输出 Token" value={formatTokensFull(task.outputTokens)} mono />
                 <Metric label="输入缓存命中" value={formatRate(task.cacheHitRate)} mono />

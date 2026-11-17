@@ -218,4 +218,18 @@ describe('TaskMachine 计费与汇总', () => {
     machine.applyState({ tool: 'codex', sessionId: 's', phase: 'active', ts: now + 1000, source: 'process' })
     expect(machine.list()[0].stateSource).toBe('hook')
   })
+
+  it('本轮开始时间随新的问答重置，不等于会话开始时间', () => {
+    const machine = makeMachine()
+    const t0 = Date.now() - 30 * 60_000
+    machine.ingest(delta({ ts: t0, dedupeKey: 'a' }))
+    const first = machine.list()[0]
+    expect(first.turnStartedAt).toBe(t0)
+
+    // 用户 3 分钟后再次提问（同一活动段内）
+    machine.ingest(delta({ ts: t0 + 3 * 60_000, turnStart: true, dedupeKey: 'b' }))
+    const second = machine.list()[0]
+    expect(second.turnStartedAt).toBe(t0 + 3 * 60_000)
+    expect(second.startedAt).toBe(t0)
+  })
 })

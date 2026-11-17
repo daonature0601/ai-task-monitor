@@ -138,6 +138,7 @@ export class TaskMachine {
         eventCount: 0,
         stateSource: 'none',
         lastStateAt: null,
+        turnStartedAt: Math.min(delta.startedAtHint ?? eventTs, eventTs, now),
         alerts: []
       }
       this.tasks.set(taskId, task)
@@ -171,6 +172,15 @@ export class TaskMachine {
     }
 
     task.lastEventAt = Math.max(task.lastEventAt, eventTs)
+
+    // 当次问答边界：来自工具自身的 turn 事件（Codex task_started/task_complete、
+    // Claude Code user 消息、hook 的 UserPromptSubmit）
+    if (delta.turnStart) {
+      task.turnStartedAt = Math.min(delta.startedAtHint ?? eventTs, eventTs, now)
+      task.turnEndedAt = undefined
+    } else if (delta.turnEnd && task.turnEndedAt === undefined) {
+      task.turnEndedAt = eventTs
+    }
     // 历史回填的同一活动段可能持续收到事件，结束时间与时长必须随之延伸。
     // 注意：这里只维护时间边界，**不再根据事件时间推断运行状态** ——
     // 状态由 applyState() 接收的运行时信号决定。
@@ -242,6 +252,7 @@ export class TaskMachine {
         eventCount: 0,
         stateSource: signal.source,
         lastStateAt: eventTs,
+        turnStartedAt: Math.min(signal.startedAtHint ?? eventTs, eventTs, now),
         alerts: []
       }
       this.tasks.set(taskId, task)
@@ -259,7 +270,23 @@ export class TaskMachine {
     }
     if (signal.workspace && !task.workspace) task.workspace = signal.workspace
     if (signal.model) task.model = signal.model
-    task.lastStateAt = Math.max(task.lastStateAt ?? 0, eventTs)
+    const previousStateAt = task.lastStateAt ?? 0
+    task.lastStateAt = Math.max(previousStateAt, eventTs)
+
+    // 当次问答边界：
+    //  - phase=start（hook 的 UserPromptSubmit）是精确起点
+    //  - 没有轮次事件的工具（心跳 / io / 进程），用「这一段活跃的起点」作为本轮起点，
+    //    避免把整段会话的开始时间当成当前问答的开始时间
+    const resumed = eventTs - previousStateAt > this.settings.idleThresholdMs
+    if (signal.phase === 'start') {
+      task.turnStartedAt = eventTs
+      task.turnEndedAt = undefined
+    } else if (signal.phase === 'active' && (resumed || previousStateAt === 0)) {
+      task.turnStartedAt = eventTs
+      task.turnEndedAt = undefined
+    } else if (signal.phase === 'end' && task.turnEndedAt === undefined) {
+      task.turnEndedAt = eventTs
+    }
 
     if (signal.phase === 'end') {
       this.endTask(task, eventTs)

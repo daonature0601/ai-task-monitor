@@ -92,6 +92,36 @@ export class ClaudeCodeAdapter extends BaseAdapter {
     } catch {
       return
     }
+    const lineTs = typeof obj.timestamp === 'string' ? Date.parse(obj.timestamp) : NaN
+    const ts = Number.isFinite(lineTs) ? lineTs : Date.now()
+
+    // 用户提交新问题 = 当次问答开始（排除工具结果回填的行）
+    if (obj.type === 'user') {
+      const message = isRecord(obj.message) ? obj.message : null
+      const content = message?.content
+      const isToolResult =
+        Array.isArray(content) &&
+        content.some((item) => isRecord(item) && item.type === 'tool_result')
+      if (isToolResult) return
+      const sid =
+        (typeof obj.sessionId === 'string' && obj.sessionId) ||
+        sessionIdFromFile(meta.relPath) ||
+        meta.relPath
+      this.push({
+        tool: this.id,
+        externalSessionId: sid,
+        ts,
+        title: typeof obj.cwd === 'string' ? basename(obj.cwd) : undefined,
+        workspace: typeof obj.cwd === 'string' ? obj.cwd : undefined,
+        tokensSource: 'unavailable',
+        skipEventLog: true,
+        turnStart: true,
+        dedupeKey: `turn:${obj.uuid ?? sid}:${ts}`,
+        ...emptyUsage()
+      })
+      return
+    }
+
     if (obj.type !== 'assistant') return
 
     const message = isRecord(obj.message) ? obj.message : null

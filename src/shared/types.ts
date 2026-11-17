@@ -66,6 +66,10 @@ export interface UsageDelta extends TokenUsage {
   startedAtHint?: number
   /** 仅用于维持活跃度、无需写入用量流水（如每 30s 的心跳） */
   skipEventLog?: boolean
+  /** 当次问答（turn）开始：用户提交新问题 */
+  turnStart?: boolean
+  /** 当次问答结束：工具完成本轮回复 */
+  turnEnd?: boolean
   /** 标题由数据源稳定生成，应覆盖任务上的旧标题 */
   authoritativeTitle?: boolean
 }
@@ -93,6 +97,10 @@ export interface TaskSnapshot extends TokenUsage {
   stateSource: StateSource
   /** 最近一次状态信号时间，用于 TTL 判定；无信号时为 null */
   lastStateAt: number | null
+  /** 当次问答的开始时间（用户提交问题的时刻） */
+  turnStartedAt: number
+  /** 当次问答的结束时间；仍在本轮中时为 undefined */
+  turnEndedAt?: number
 }
 
 export interface AdapterCapabilities {

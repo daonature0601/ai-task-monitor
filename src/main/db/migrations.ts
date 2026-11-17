@@ -125,6 +125,22 @@ ALTER TABLE tasks ADD COLUMN state_source TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE tasks ADD COLUMN last_state_at INTEGER;
 `)
     }
+  },
+  {
+    /**
+     * v4：时间口径改为「当次问答」。
+     * turn_started_at 记录用户提交当前问题的时刻，turn_ended_at 记录本轮回复完成时刻。
+     * 界面上的「开始时间 / 时长」用这两个字段，而不是会话起始时间。
+     */
+    version: 4,
+    name: 'turn-boundary',
+    up: (db) => {
+      db.exec(`
+ALTER TABLE tasks ADD COLUMN turn_started_at INTEGER;
+ALTER TABLE tasks ADD COLUMN turn_ended_at INTEGER;
+UPDATE tasks SET turn_started_at = started_at WHERE turn_started_at IS NULL;
+`)
+    }
   }
 ]
 

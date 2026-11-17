@@ -62,6 +62,27 @@ export function formatTaskCost(
   return formatCost(usd, currency, fxRate)
 }
 
+/**
+ * 当次问答（turn）已用时长。
+ * 优先用 turnStartedAt/turnEndedAt；老数据没有轮次信息时回落到任务时长。
+ */
+export function turnElapsed(
+  task: {
+    turnStartedAt?: number
+    turnEndedAt?: number
+    status: string
+    endedAt?: number
+    durationMs: number
+  },
+  now = Date.now()
+): number {
+  const start = task.turnStartedAt
+  if (!start) return task.durationMs
+  const end =
+    task.turnEndedAt ?? (task.status === 'ended' ? (task.endedAt ?? start) : now)
+  return Math.max(0, end - start)
+}
+
 /** 保留 1 位；null 显示 — */
 export function formatRate(rate: number | null | undefined): string {
   if (rate === null || rate === undefined || !Number.isFinite(rate)) return '—'

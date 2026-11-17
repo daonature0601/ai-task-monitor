@@ -185,6 +185,28 @@ export class CodexAdapter extends BaseAdapter {
     this.markIo(session, meta)
 
 
+    // Codex 自带的任务边界事件：task_started 是本轮开始，task_complete 是本轮结束
+    if (type === 'event_msg' && payload) {
+      const kind = typeof payload.type === 'string' ? payload.type : ''
+      if (kind === 'task_started' || kind === 'task_complete') {
+        const ts = parseTs(obj.timestamp) ?? Date.now()
+        this.push({
+          tool: this.id,
+          externalSessionId: session.sessionId,
+          ts,
+          title: session.cwd ? basename(session.cwd) : undefined,
+          workspace: session.cwd,
+          model: session.model,
+          tokensSource: 'unavailable',
+          skipEventLog: true,
+          turnStart: kind === 'task_started',
+          turnEnd: kind === 'task_complete',
+          dedupeKey: `turn:${kind}:${ts}`,
+          ...emptyUsage()
+        })
+      }
+    }
+
     if (type === 'event_msg' && payload && payload.type === 'token_count') {
       // 使用原始事件时间，避免把历史会话误判为"刚刚发生"
       this.handleTokenCount(payload, session, meta, parseTs(obj.timestamp))
