@@ -29,8 +29,9 @@ import {
   queryTasks,
   rowToSnapshot
 } from './db/repositories/tasks'
-import { listEventsForTask } from './db/repositories/usage'
+import { listEventsForTask, listTaskTurns } from './db/repositories/usage'
 import { recomputeEventCosts } from './db/repositories/event-cost'
+import { rebuildTaskTurns, TURNS_VERSION } from './core/turn-backfill'
 import { buildStats, summaryFor } from './db/repositories/stats'
 import { TaskMachine } from './core/task-machine'
 import { StateInbox } from './collectors/state-inbox'
@@ -42,7 +43,7 @@ import { buildSnapshot } from './core/snapshot'
 import { evaluateTask } from './core/alerts'
 import type { CursorStore } from './collectors/jsonl-tailer'
 
-const EVENTS_COST_VERSION = 12
+const EVENTS_COST_VERSION = 13
 
 export interface RuntimeHooks {
   onSnapshot: (snapshot: SnapshotPayload) => void
@@ -329,7 +330,7 @@ export function createRuntime(
       if (!row) return null
       // 详情与列表必须同口径：本轮用量按事件时间重算，否则抽屉里的「本轮」会与列表不一致
       const [task] = attachTurnStats(db, [enrich(rowToSnapshot(row))])
-      return { task, events: listEventsForTask(db, id, 300) }
+      return { task, events: listEventsForTask(db, id, 300), turns: listTaskTurns(db, id) }
     },
     getStats: (from, to) => buildStats(db, from, to),
     bridgeStatus: () => bridge.status(),
@@ -370,6 +371,21 @@ export function createRuntime(
 }
 
 export async function startRuntime(runtime: Runtime): Promise<void> {
+  // 轮次按源日志重建（版本变化时执行一次）：任务主表只保存「当前这一轮」的边界，
+  // 历史轮次必须回到各工具的原始记录里还原。
+  if ((runtime.getSettings().turnsVersion ?? 0) !== TURNS_VERSION) {
+    const startedAt = Date.now()
+    try {
+      const result = await rebuildTaskTurns(runtime.db)
+      runtime.updateSettings({ turnsVersion: TURNS_VERSION })
+      console.log(
+        `[turns] rebuilt ${result.rows} rows from ${result.spans} spans in ${Date.now() - startedAt}ms`
+      )
+    } catch (error) {
+      console.error('[turns] rebuild failed', error)
+    }
+  }
+
   await runtime.adapters.startAll()
   await runtime.stateInbox.start()
   await runtime.bridge.start()

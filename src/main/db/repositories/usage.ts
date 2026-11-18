@@ -90,3 +90,56 @@ export function countEventsForTask(db: Database.Database, taskId: string): numbe
     }
   ).c
 }
+
+export interface TurnRow {
+  id: number
+  startedAt: number
+  endedAt: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costUsd: number
+}
+
+/** 按轮次聚合用量：事件落在 [started_at, ended_at) 内即归属该轮 */
+export function listTaskTurns(db: Database.Database, taskId: string): TurnRow[] {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.started_at, t.ended_at,
+              COALESCE(SUM(e.input_tokens), 0) AS i,
+              COALESCE(SUM(e.output_tokens), 0) AS o,
+              COALESCE(SUM(e.cache_read_tokens), 0) AS r,
+              COALESCE(SUM(e.cache_write_tokens), 0) AS w,
+              COALESCE(SUM(e.cost_usd), 0) AS c
+         FROM task_turns t
+         LEFT JOIN usage_events e
+           ON e.task_id = t.task_id
+          AND e.ts >= t.started_at
+          AND e.ts < COALESCE(t.ended_at, 9223372036854775807)
+        WHERE t.task_id = ?
+        GROUP BY t.id
+        ORDER BY t.started_at DESC
+        LIMIT 200`
+    )
+    .all(taskId) as Array<{
+    id: number
+    started_at: number
+    ended_at: number | null
+    i: number
+    o: number
+    r: number
+    w: number
+    c: number
+  }>
+  return rows.map((row) => ({
+    id: row.id,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    inputTokens: row.i,
+    outputTokens: row.o,
+    cacheReadTokens: row.r,
+    cacheWriteTokens: row.w,
+    costUsd: row.c
+  }))
+}

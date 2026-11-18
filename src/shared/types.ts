@@ -187,6 +187,8 @@ export interface AppSettings {
   backfillDays: number
   /** 事件费用回填版本，用于一次性重算历史流水 */
   eventsCostVersion: number
+  /** 轮次重建版本：变化时按源数据重算 task_turns */
+  turnsVersion?: number
   launchAtLogin: boolean
   bridgeEnabled: boolean
   bridgePort: number
@@ -276,9 +278,32 @@ export interface UsageEventItem extends TokenUsage {
   dedupeKey: string
 }
 
+export interface TaskTurn {
+  id: number
+  startedAt: number
+  endedAt: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costUsd: number
+}
+
+export interface TaskTurn {
+  id: number
+  startedAt: number
+  endedAt: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  costUsd: number
+}
+
 export interface TaskDetail {
   task: TaskSnapshot
   events: UsageEventItem[]
+  turns: TaskTurn[]
 }
 
 export interface ToolAggregate {

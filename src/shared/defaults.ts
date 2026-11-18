@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   retentionDays: 90,
   backfillDays: 7,
   eventsCostVersion: 0,
+  turnsVersion: 0,
   launchAtLogin: false,
   bridgeEnabled: true,
   bridgePort: 43117,

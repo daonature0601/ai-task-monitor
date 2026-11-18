@@ -177,6 +177,37 @@ ALTER TABLE tasks ADD COLUMN project TEXT;
     up: (db) => {
       db.exec(`ALTER TABLE pricing ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD';`)
     }
+  },
+  {
+    /**
+     * v8：轮次表。一次用户输入 → AI 完成该输入的全部动作算一轮，
+     * 每一轮的 token / 耗时 / 费用独立可查。
+     */
+    version: 8,
+    name: 'task-turns',
+    up: (db) => {
+      db.exec(`
+CREATE TABLE IF NOT EXISTS task_turns (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  ended_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_turns_task ON task_turns(task_id, started_at);
+`)
+    }
+  },
+  {
+    /** v9：同一任务的同一轮只能有一条，防止重复回填 / 并发重建产生副本 */
+    version: 9,
+    name: 'task-turns-unique',
+    up: (db) => {
+      db.exec(`
+DELETE FROM task_turns
+ WHERE rowid NOT IN (SELECT MIN(rowid) FROM task_turns GROUP BY task_id, started_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_unique ON task_turns(task_id, started_at);
+`)
+    }
   }
 ]
 

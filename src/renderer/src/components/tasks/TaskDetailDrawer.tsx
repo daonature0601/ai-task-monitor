@@ -10,6 +10,7 @@ import {
   formatEventTime,
   formatTaskCost,
   formatTimeFull,
+  formatTimeShort,
   formatTokens,
   formatTokensFull,
   SOURCE_LABEL,
@@ -253,9 +254,45 @@ export function TaskDetailDrawer(): JSX.Element | null {
               </section>
 
               <section>
-                <p className="label-xs mb-2">用量事件时间线</p>
+                <p className="label-xs mb-2">轮次（{(detail?.turns ?? []).length} 轮）</p>
+                <div className="space-y-1">
+                  {(detail?.turns ?? []).length === 0 ? (
+                    <p className="text-caption text-fg-lo">暂无轮次数据</p>
+                  ) : (
+                    (detail?.turns ?? []).map((turn, index) => (
+                      <div
+                        key={turn.id}
+                        className="flex items-center justify-between rounded-md bg-white/[0.02] px-2 py-1.5 text-caption"
+                      >
+                        <span className="num text-fg-mid">
+                          #{(detail?.turns ?? []).length - index} · {formatTimeShort(turn.startedAt)}
+                        </span>
+                        <span className="num text-fg-lo">
+                          {formatDuration((turn.endedAt ?? turn.startedAt) - turn.startedAt)}
+                        </span>
+                        <span className="num text-fg-mid">
+                          {formatTokens(turn.inputTokens)} in / {formatTokens(turn.outputTokens)} out
+                        </span>
+                        <span className="num text-fg-lo">
+                          {formatRate(
+                            computeCacheHitRate({
+                              inputTokens: turn.inputTokens,
+                              cacheReadTokens: turn.cacheReadTokens
+                            })
+                          )}
+                        </span>
+                        <span className="num text-fg-hi">
+                          {formatTaskCost(turn.costUsd, task.costKnown, currency, fxRate)}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section>
                 <div className="space-y-1.5">
-                  {(detail?.events ?? []).slice(0, 40).map((event) => (
+                  {(detail?.events ?? []).slice(0, 0).map((event) => (
                     <div
                       key={event.id}
                       className="flex items-center justify-between rounded-lg border border-white/[0.045] bg-white/[0.02] px-2.5 py-1.5"
@@ -272,7 +309,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
                       </span>
                     </div>
                   ))}
-                  {(detail?.events?.length ?? 0) === 0 && (
+                  {false && (
                     <p className="rounded-lg border border-dashed border-white/[0.07] px-3 py-4 text-center text-caption text-fg-lo">
                       该任务暂无落库的用量事件
                     </p>

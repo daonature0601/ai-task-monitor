@@ -13,6 +13,8 @@ const MAX_QUEUE = 8000
  */
 export class BatchWriter {
   private queue: UsageEventRow[] = []
+  /** 待落库的轮次操作：start 开新轮并闭合上一条，end 闭合当前轮 */
+  private turnOps: Array<{ taskId: string; kind: 'start' | 'end'; ts: number }> = []
   private lastFlushAt = 0
   private insertedTotal = 0
 
@@ -31,6 +33,13 @@ export class BatchWriter {
     // 与任务主表口径一致：价目未核实时事件费用也记 0（界面不展示金额）
     const billable =
       (delta.tokensSource === 'native' || delta.tokensSource === 'bridge') && !price.pending
+    if (delta.turnStart || delta.turnEnd) {
+      this.turnOps.push({
+        taskId,
+        kind: delta.turnStart ? 'start' : 'end',
+        ts: delta.ts
+      })
+    }
     this.queue.push({
       taskId,
       ts: delta.ts,
@@ -46,6 +55,25 @@ export class BatchWriter {
   }
 
   /** 返回本次写入的事件条数与任务条数 */
+  private flushTurns(db: Database.Database): void {
+    if (this.turnOps.length === 0) return
+    const close = db.prepare(
+      'UPDATE task_turns SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL'
+    )
+    const open = db.prepare('INSERT INTO task_turns (task_id, started_at) VALUES (?, ?)')
+    db.transaction(() => {
+      for (const op of this.turnOps) {
+        if (op.kind === 'start') {
+          close.run(op.ts, op.taskId)
+          open.run(op.taskId, op.ts)
+        } else {
+          close.run(op.ts, op.taskId)
+        }
+      }
+    })()
+    this.turnOps = []
+  }
+
   flush(force = false): { events: number; tasks: number } {
     const now = Date.now()
     const due = force || this.queue.length >= 200 || now - this.lastFlushAt >= 1000
