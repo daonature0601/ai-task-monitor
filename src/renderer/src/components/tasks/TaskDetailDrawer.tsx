@@ -183,7 +183,6 @@ export function TaskDetailDrawer(): JSX.Element | null {
                   <Metric label="输入 Token" value={formatTokensFull(task.inputTokens)} mono />
                   <Metric label="输出 Token" value={formatTokensFull(task.outputTokens)} mono />
                   <Metric label="缓存命中" value={formatRate(task.cacheHitRate)} mono />
-                  <Metric label="输出缓存命中" value="—" mono hint="工具未上报该指标" />
                 <Metric
                   label="会话费用"
                   value={formatTaskCost(task.costUsd, task.costKnown, currency, fxRate)}
