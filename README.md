@@ -62,7 +62,7 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 | Codex | `~/.codex/sessions/{Y}/{M}/{D}/rollout-*.jsonl` | JSONL 增量 tail，读 `token_count.info.last_token_usage`；`task_started` / `task_complete` 定本轮边界；模型取自 `model`（`model_provider` 不算） | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
 | Claude Code | `~/.claude/projects/<slug>/<uuid>.jsonl` | JSONL 增量 tail，逐行累加 `message.usage`；`type=user` 定本轮起点、`summary` 行取会话名 | 完整：输入 / 输出 / `cache_read` / `cache_creation` |
 | WorkBuddy | `~/.workbuddy/projects/**/*.jsonl`（`providerData.rawUsage`） | JSONL 增量 tail；`ai-title` 取任务名、user/assistant 消息划轮次、`keepSession` 一次对话一个任务；子代理按路径归属父会话 | 完整：输入 / 输出 / 缓存读 / 缓存写 / 推理 |
-| CodeBuddy | IDE：`CodeBuddyExtension/Data/**/history/<ws>/<convId>/index.json`；CLI：`~/.codebuddy/projects/*.jsonl` | 索引轮询（mtime + 最大时间戳游标 + 跨副本指纹去重）与 JSONL tail 并行；每条请求即一轮、一次对话一个任务；状态走 `edit-sessions` | IDE 为请求级真实用量（**不含模型名，费用 `—`**）；CLI 原生 |
+| CodeBuddy | IDE：`CodeBuddyExtension/Data/**/history/<ws>/<convId>/index.json`（用量）+ `globalStorage/tencent-cloud.coding-copilot/message-queue/<wsHash>.json`（模型）；CLI：`~/.codebuddy/projects/*.jsonl` | 索引轮询（mtime + 最大时间戳游标 + 跨副本指纹去重）与 JSONL tail 并行；模型取 `items[].modelId`；每条请求即一轮、一次对话一个任务；状态走 `edit-sessions` | IDE 为请求级真实用量；模型**仅活跃会话可得**，历史会话显示「模型未知」、费用 `—` |
 | Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | 只读 SQLite（`ItemTable`） | 多数情况下不可得（服务端持有） |
 | DeepSeek Harness | `~/.dsh/sessions/<项目>/<会话>/session.v4.jsonl.zstd` | zstd 多帧解压（`fzstd`）+ 按 `seq` 增量去重；`turn/start|end` 定轮次、`session/title` 取任务名、`request/header.config.model` 取模型 | 完整：输入 / 输出 / 缓存读 / 缓存写 |
 | 元宝 | 无本地会话落盘（实测仅 `.qimei/`、`Documents/`） | 本地 HTTP 桥接 + 用户脚本 | 桥接可用；否则仅记录会话时长 |
@@ -76,7 +76,8 @@ npm run smoke          # 无界面自检：打印适配器状态、汇总与桥�
 - `partial` —— 只能取到部分字段（如 WorkBuddy 的上下文占用量），**费用显示 `—`**
 - `unavailable` —— 无用量来源，仅记录会话时长，费用与命中率显示 `—`
 
-> CodeBuddy IDE 的索引不含模型名，token 为 `native` 但无法计价，费用显示 `—`；任务副标题统一显示「项目未知 / 模型未知」。
+> CodeBuddy IDE 的模型来自插件的 `message-queue` 缓存（`items[].modelId`），**只覆盖最近交互过的会话**；
+> 取不到模型的历史会话 token 仍为 `native`，但费用显示 `—`，副标题显示「模型未知」。
 
 ---
 
@@ -279,7 +280,8 @@ adapters（7 个采集器）
 1. **元宝** 本地无任何会话/用量落盘，不装脚本时只能记录「进程存活 + 会话时长」，token 全为 `—`。
 2. **DeepSeek Harness** 的会话与用量在 `~/.dsh/sessions` 的 zstd 文件里（Local Storage 只有界面状态）；历史会话可完整回补，但文件是整块压缩，每次只能整份重解。
 3. **Cursor** 的 token 用量由服务端持有，本地通常只有会话时间线，费用显示 `—`。
-4. **CodeBuddy IDE 无模型名**：`index.json` 只有用量没有模型（`state.vscdb` 里是加密值），因此 token 准确但费用恒为 `—`。
+4. **CodeBuddy 的模型只对活跃会话可得**：`index.json` 只有用量，模型取自插件的 `message-queue` 临时缓存，
+   只保留最近交互过的会话；历史会话的模型本地确实不存在，显示「模型未知」、费用 `—`，不做猜测。
 5. **回填窗口由设置项 `backfillDays` 控制**（默认 7 天，按文件 mtime 过滤）：更早的事件不会自动导入；调大该值并清空 `file_cursors` 重扫可回补更早的历史。
 6. **未知/待确认模型不计价**：费用列显示 `—`，需在设置页补录单价并标记「已核实」后才会计算。
 7. **Codex 现已按官方价计价**（`gpt-5.3-codex`、`gpt-6.x` 等）；只有 `codex-auto-review` 这类内部线程无公开单价，费用显示 `—`。
