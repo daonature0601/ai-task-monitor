@@ -271,7 +271,9 @@ export function queryTasks(
   // 与快照保持一致的过滤：零时长的已结束任务不进入列表
   where.push("NOT (status = 'ended' AND COALESCE(turn_ended_at, ended_at, last_event_at, turn_started_at) <= turn_started_at)")
   // 只有标题、没有任何用量事件的已结束会话不进入列表
-  where.push("NOT (status = 'ended' AND event_count = 0 AND input_tokens = 0 AND output_tokens = 0 AND cache_read_tokens = 0 AND cache_write_tokens = 0)")
+  // 已结束且四类 token 全为 0 的任务（空回合、只有开始信号）同样不进入列表，
+  // 与快照层 isEmptyRound 的口径一致
+  where.push("NOT (status = 'ended' AND input_tokens = 0 AND output_tokens = 0 AND cache_read_tokens = 0 AND cache_write_tokens = 0)")
 
   if (query.keyword && query.keyword.trim()) {
     where.push('(title LIKE @kw OR project LIKE @kw OR workspace LIKE @kw OR model LIKE @kw OR external_session_id LIKE @kw)')
