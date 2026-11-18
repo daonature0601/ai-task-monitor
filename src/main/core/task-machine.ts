@@ -175,6 +175,11 @@ export class TaskMachine {
         stateSource: 'none',
         lastStateAt: null,
         turnStartedAt: Math.min(delta.startedAtHint ?? eventTs, eventTs, now),
+        turnInputTokens: 0,
+        turnOutputTokens: 0,
+        turnCacheReadTokens: 0,
+        turnCacheWriteTokens: 0,
+        turnCostUsd: 0,
         alerts: []
       }
       this.tasks.set(taskId, task)
@@ -209,6 +214,10 @@ export class TaskMachine {
     task.cacheReadTokens += cacheRead
     task.cacheWriteTokens += cacheWrite
     task.reasoningTokens += positive(delta.reasoningTokens)
+    task.turnInputTokens += input
+    task.turnOutputTokens += output
+    task.turnCacheReadTokens += cacheRead
+    task.turnCacheWriteTokens += cacheWrite
     // 心跳只维持活跃度，不是用量事件，不计入事件数
     if (!delta.skipEventLog) task.eventCount += 1
 
@@ -221,11 +230,13 @@ export class TaskMachine {
       const billable =
         (task.tokensSource === 'native' || task.tokensSource === 'bridge') && !price.pending
       if (billable && price.row) {
-        task.costUsd += computeCost(
+        const deltaCost = computeCost(
           { inputTokens: input, outputTokens: output, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite, reasoningTokens: 0 },
           price.row,
           eventTs
         )
+        task.costUsd += deltaCost
+        task.turnCostUsd += deltaCost
         // 模型是这条事件才解析出来的：把此前按「无单价」累积的 0 补回来
         if (delta.model && delta.model !== modelBefore && modelBefore === undefined && task.eventCount > 1) {
           const prior = {
@@ -256,6 +267,11 @@ export class TaskMachine {
     if (delta.turnStart) {
       task.turnStartedAt = Math.min(delta.startedAtHint ?? eventTs, eventTs, now)
       task.turnEndedAt = undefined
+      task.turnInputTokens = 0
+      task.turnOutputTokens = 0
+      task.turnCacheReadTokens = 0
+      task.turnCacheWriteTokens = 0
+      task.turnCostUsd = 0
     } else if (delta.turnEnd && task.turnEndedAt === undefined) {
       task.turnEndedAt = eventTs
     }
@@ -341,6 +357,11 @@ export class TaskMachine {
         stateSource: signal.source,
         lastStateAt: eventTs,
         turnStartedAt: Math.min(signal.startedAtHint ?? eventTs, eventTs, now),
+        turnInputTokens: 0,
+        turnOutputTokens: 0,
+        turnCacheReadTokens: 0,
+        turnCacheWriteTokens: 0,
+        turnCostUsd: 0,
         alerts: []
       }
       this.tasks.set(taskId, task)

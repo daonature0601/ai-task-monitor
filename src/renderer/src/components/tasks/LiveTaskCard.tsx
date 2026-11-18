@@ -8,7 +8,8 @@ import {
   turnElapsed,
   formatTokens,
   STATUS_HINT,
-  STATUS_LABEL
+  STATUS_LABEL,
+  computeCacheHitRate
 } from '@shared/format'
 import { cn, statusTone } from '../../lib/utils'
 import { Badge, StatusDot, ToolAvatar } from '../ui/atoms'
@@ -90,11 +91,17 @@ export function LiveTaskCard({
       </div>
 
       <div className="mt-3.5 grid grid-cols-4 gap-2">
-        <Stat icon={<Hash size={10} />} label="输入" value={formatTokens(task.inputTokens)} accent="text-accent-cyan" />
-        <Stat label="输出" value={formatTokens(task.outputTokens)} accent="text-accent-teal" />
+        <Stat icon={<Hash size={10} />} label="输入" value={formatTokens(task.turnInputTokens)} accent="text-accent-cyan" />
+        <Stat label="输出" value={formatTokens(task.turnOutputTokens)} accent="text-accent-teal" />
         <Stat
           label="缓存命中"
-          value={formatRate(task.cacheHitRate)}
+          value={formatRate(
+            computeCacheHitRate({
+              inputTokens: task.turnInputTokens,
+              cacheReadTokens: task.turnCacheReadTokens,
+              cacheWriteTokens: task.turnCacheWriteTokens
+            })
+          )}
           accent={
             task.alerts.includes('cache_low') ? 'text-state-warn' : 'text-accent-violet'
           }
@@ -102,7 +109,7 @@ export function LiveTaskCard({
         <Stat
           icon={<Coins size={10} />}
           label="费用"
-          value={formatTaskCost(task.costUsd, task.costKnown, currency, fxRate)}
+          value={formatTaskCost(task.turnCostUsd, task.costKnown, currency, fxRate)}
           accent={danger ? 'text-state-danger' : warn ? 'text-state-warn' : 'text-fg-hi'}
         />
       </div>

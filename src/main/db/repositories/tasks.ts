@@ -60,6 +60,11 @@ export function rowToSnapshot(row: TaskRow): TaskSnapshot {
     stateSource: (row.state_source as TaskSnapshot['stateSource']) ?? 'none',
     lastStateAt: row.last_state_at ?? null,
     turnStartedAt: row.turn_started_at ?? row.started_at,
+    turnInputTokens: row.input_tokens,
+    turnOutputTokens: row.output_tokens,
+    turnCacheReadTokens: row.cache_read_tokens,
+    turnCacheWriteTokens: row.cache_write_tokens,
+    turnCostUsd: row.cost_usd,
     project: row.project ?? undefined,
     turnEndedAt: row.turn_ended_at ?? undefined,
     cacheHitRate,
@@ -150,16 +155,44 @@ export function getTaskRow(db: Database.Database, id: string): TaskRow | null {
   return row ?? null
 }
 
+
+/**
+ * 列表展示的是「本轮」用量：只统计 turn_started_at 之后写入的事件。
+ * 任务的会话累计值仍在 tasks 表里，详情抽屉使用它。
+ */
+function attachTurnStats(db: Database.Database, rows: TaskSnapshot[]): TaskSnapshot[] {
+  if (rows.length === 0) return rows
+  const stmt = db.prepare(
+    `SELECT COALESCE(SUM(e.input_tokens), 0) AS i,
+            COALESCE(SUM(e.output_tokens), 0) AS o,
+            COALESCE(SUM(e.cache_read_tokens), 0) AS r,
+            COALESCE(SUM(e.cache_write_tokens), 0) AS w,
+            COALESCE(SUM(e.cost_usd), 0) AS c
+       FROM usage_events e JOIN tasks t ON t.id = e.task_id
+      WHERE e.task_id = ? AND e.ts >= COALESCE(t.turn_started_at, 0)`
+  )
+  for (const row of rows) {
+    const agg = stmt.get(row.id) as { i: number; o: number; r: number; w: number; c: number } | undefined
+    if (!agg) continue
+    row.turnInputTokens = agg.i
+    row.turnOutputTokens = agg.o
+    row.turnCacheReadTokens = agg.r
+    row.turnCacheWriteTokens = agg.w
+    row.turnCostUsd = agg.c
+  }
+  return rows
+}
+
 export function listRecentTasks(db: Database.Database, limit = 500): TaskSnapshot[] {
   const rows = db.prepare('SELECT * FROM tasks ORDER BY last_event_at DESC LIMIT ?').all(limit) as TaskRow[]
-  return rows.map(rowToSnapshot)
+  return attachTurnStats(db, rows.map(rowToSnapshot))
 }
 
 export function listOpenTasks(db: Database.Database): TaskSnapshot[] {
   const rows = db
     .prepare("SELECT * FROM tasks WHERE status IN ('running','idle') ORDER BY last_event_at DESC")
     .all() as TaskRow[]
-  return rows.map(rowToSnapshot)
+  return attachTurnStats(db, rows.map(rowToSnapshot))
 }
 
 export function queryTasks(
@@ -184,11 +217,13 @@ export function queryTasks(
     })
   }
   if (query.from) {
-    where.push('started_at >= @from')
+    // 时间筛选与列表展示的「本轮开始」保持同一口径：
+    // 只按会话起点过滤，会让「今天开始的一轮、昨天开的会话」漏掉
+    where.push('COALESCE(turn_started_at, started_at) >= @from')
     params.from = query.from
   }
   if (query.to) {
-    where.push('started_at <= @to')
+    where.push('COALESCE(turn_started_at, started_at) <= @to')
     params.to = query.to
   }
   // 与快照保持一致的过滤：零时长的已结束任务不进入列表
@@ -217,7 +252,7 @@ export function queryTasks(
     )
     .all({ ...params, limit, offset }) as TaskRow[]
 
-  return { rows: rows.map(rowToSnapshot), total }
+  return { rows: attachTurnStats(db, rows.map(rowToSnapshot)), total }
 }
 
 export function markStaleTasksEnded(db: Database.Database, now = Date.now()): number {

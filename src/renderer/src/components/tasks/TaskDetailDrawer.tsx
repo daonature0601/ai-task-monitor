@@ -13,7 +13,8 @@ import {
   formatTokens,
   formatTokensFull,
   SOURCE_LABEL,
-  STATUS_LABEL
+  STATUS_LABEL,
+  computeCacheHitRate
 } from '@shared/format'
 import { useMonitor } from '../../store/monitor'
 import { useNow } from '../../hooks/useTicker'
@@ -148,14 +149,43 @@ export function TaskDetailDrawer(): JSX.Element | null {
                   mono
                   hint={task.status === 'ended' ? '本轮回复已结束' : undefined}
                 />
-                <Metric label="输入 Token" value={formatTokensFull(task.inputTokens)} mono />
-                <Metric label="输出 Token" value={formatTokensFull(task.outputTokens)} mono />
-                <Metric label="输入缓存命中" value={formatRate(task.cacheHitRate)} mono />
-                <Metric label="输出缓存命中" value="—" mono hint="工具未上报该指标" />
                 <Metric label="模型" value={task.model ?? '—'} hint="数据源未提供模型时不计价" />
                 <Metric label="事件数" value={String(task.eventCount)} mono />
+              </div>
+
+              <div>
+                <p className="label-xs mb-2">本轮</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Metric label="输入 Token" value={formatTokensFull(task.turnInputTokens)} mono />
+                  <Metric label="输出 Token" value={formatTokensFull(task.turnOutputTokens)} mono />
+                  <Metric
+                    label="缓存命中"
+                    value={formatRate(
+                      computeCacheHitRate({
+                        inputTokens: task.turnInputTokens,
+                        cacheReadTokens: task.turnCacheReadTokens,
+                        cacheWriteTokens: task.turnCacheWriteTokens
+                      })
+                    )}
+                    mono
+                  />
+                  <Metric
+                    label="本轮费用"
+                    value={formatTaskCost(task.turnCostUsd, task.costKnown, currency, fxRate)}
+                    mono
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="label-xs mb-2">会话累计</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Metric label="输入 Token" value={formatTokensFull(task.inputTokens)} mono />
+                  <Metric label="输出 Token" value={formatTokensFull(task.outputTokens)} mono />
+                  <Metric label="缓存命中" value={formatRate(task.cacheHitRate)} mono />
+                  <Metric label="输出缓存命中" value="—" mono hint="工具未上报该指标" />
                 <Metric
-                  label="当前费用"
+                  label="会话费用"
                   value={formatTaskCost(task.costUsd, task.costKnown, currency, fxRate)}
                   mono
                   tone={task.alerts.includes('cost_danger') ? 'danger' : 'default'}
@@ -171,6 +201,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
                           : '模型单价待确认'
                   }
                 />
+                </div>
               </div>
 
               <section>

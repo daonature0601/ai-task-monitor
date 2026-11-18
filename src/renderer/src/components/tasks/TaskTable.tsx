@@ -1,5 +1,6 @@
 import type { Currency, TaskSnapshot } from '@shared/types'
 import {
+  computeCacheHitRate,
   formatDuration,
   formatRate,
   formatTaskCost,
@@ -102,20 +103,26 @@ export function TaskTable({
                 <td className="num px-3 py-2.5 text-caption text-fg-mid">
                   {formatDuration(elapsed)}
                 </td>
-                <td className="num px-3 py-2.5 text-right text-fg-mid" title={formatTokensFull(task.inputTokens)}>
-                  {formatTokens(task.inputTokens)}
+                <td className="num px-3 py-2.5 text-right text-fg-mid" title={formatTokensFull(task.turnInputTokens)}>
+                  {formatTokens(task.turnInputTokens)}
                 </td>
                 <td className="num px-3 py-2.5 text-right text-fg-mid" title={formatTokensFull(task.outputTokens)}>
-                  {formatTokens(task.outputTokens)}
+                  {formatTokens(task.turnOutputTokens)}
                 </td>
-                <td className="num px-3 py-2.5 text-right text-fg-mid">{formatRate(task.cacheHitRate)}</td>
+                <td className="num px-3 py-2.5 text-right text-fg-mid">{formatRate(
+                computeCacheHitRate({
+                  inputTokens: task.turnInputTokens,
+                  cacheReadTokens: task.turnCacheReadTokens,
+                  cacheWriteTokens: task.turnCacheWriteTokens
+                })
+              )}</td>
                 <td
                   className={cn(
                     'num px-3 py-2.5 text-right',
                     danger ? 'text-state-danger' : 'text-fg-hi'
                   )}
                 >
-                  {formatTaskCost(task.costUsd, task.costKnown, currency, fxRate)}
+                  {formatTaskCost(task.turnCostUsd, task.costKnown, currency, fxRate)}
                 </td>
                 <td className="px-3 py-2.5 text-right">
                    <span

@@ -107,6 +107,12 @@ export interface TaskSnapshot extends TokenUsage {
   turnStartedAt: number
   /** 当次问答的结束时间；仍在本轮中时为 undefined */
   turnEndedAt?: number
+  /** 本轮用量（列表展示口径）：只统计 turn_started_at 之后的事件 */
+  turnInputTokens: number
+  turnOutputTokens: number
+  turnCacheReadTokens: number
+  turnCacheWriteTokens: number
+  turnCostUsd: number
 }
 
 export interface AdapterCapabilities {
