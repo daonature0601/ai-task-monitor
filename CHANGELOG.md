@@ -86,6 +86,8 @@
   现 `StateSignal` 与 `UsageDelta` 都支持 `keepSession`，CodeBuddy / WorkBuddy / DeepSeek
   一个会话即一个任务（Codex / Claude 仍按轮次切分）；重导后 WorkBuddy 301→188、DeepSeek 13→8
 - **只有标题的会话不再进入列表**：已结束且无任何事件、无任何 token 的空会话在快照与查询层一并隐藏
+- **轮次耗时口径**：CodeBuddy 的轮次结束取「下一条请求起点」（本地无请求完成时间与步骤级时间戳），
+  多数轮次与软件逐秒一致，长停顿轮次偏大；被中断的 0 用量请求不计入轮次
 - **模型名被 provider 顶替**：Codex 用 `session.model ?? session.provider` 兜底，`session_meta` 只有
   `model_provider` 时会把 `openai` 写成模型，重启后还会覆盖已解析出的真模型。
   现从 `session_meta` / `turn_context` / `compacted` 递归提取真实模型名，缺值时留空，
