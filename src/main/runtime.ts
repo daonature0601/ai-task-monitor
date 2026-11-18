@@ -32,6 +32,8 @@ import {
 import { listEventsForTask, listTaskTurns } from './db/repositories/usage'
 import { recomputeEventCosts } from './db/repositories/event-cost'
 import { rebuildTaskTurns, TURNS_VERSION } from './core/turn-backfill'
+import { listCbIdeWorkspaceModels } from './collectors/codebuddy-ide'
+import { appSupportDir } from './collectors/paths'
 import { buildStats, summaryFor } from './db/repositories/stats'
 import { TaskMachine } from './core/task-machine'
 import { StateInbox } from './collectors/state-inbox'
@@ -43,7 +45,7 @@ import { buildSnapshot } from './core/snapshot'
 import { evaluateTask } from './core/alerts'
 import type { CursorStore } from './collectors/jsonl-tailer'
 
-const EVENTS_COST_VERSION = 15
+const EVENTS_COST_VERSION = 16
 
 export interface RuntimeHooks {
   onSnapshot: (snapshot: SnapshotPayload) => void
@@ -410,6 +412,33 @@ export function createRuntime(
 }
 
 export async function startRuntime(runtime: Runtime): Promise<void> {
+  // CodeBuddy IDE 的模型补录：工作区索引里带 selectedModelId（本机 38/170 覆盖），
+  // 适配器只对活跃会话推送模型，历史会话在这里一次性补齐。
+  {
+    const models = await listCbIdeWorkspaceModels(
+      join(appSupportDir(), 'CodeBuddyExtension', 'Data')
+    )
+    if (models.size > 0) {
+      const update = runtime.db.prepare(
+        "UPDATE tasks SET model = ? WHERE tool = 'codebuddy' AND external_session_id = ? AND (model IS NULL OR model = '')"
+      )
+      let filled = 0
+      runtime.db.transaction(() => {
+        for (const [conversationId, model] of models) {
+          filled += update.run(model, conversationId).changes
+        }
+      })()
+      if (filled > 0) {
+        console.log(`[model] filled ${filled} codebuddy tasks from workspace index`)
+        // 模型是费用计算的前提：补上模型后必须按新模型重算一次事件费用，
+        // 否则历史事件仍是「模型未知时算出的 0」，界面继续显示 —。
+        const result = recomputeEventCosts(runtime.db, runtime.getPricing())
+        console.log(`[model] repriced ${result.updated}/${result.total} events`)
+      }
+    }
+  }
+
+
   // 轮次按源日志重建（版本变化时执行一次）：任务主表只保存「当前这一轮」的边界，
   // 历史轮次必须回到各工具的原始记录里还原。
   if ((runtime.getSettings().turnsVersion ?? 0) !== TURNS_VERSION) {

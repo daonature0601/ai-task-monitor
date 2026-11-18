@@ -12,7 +12,9 @@ import {
   readCbIdeModels,
   readCbIdeProjects,
   readCbIdeRequests,
-  readCbIdeTitles
+  readCbIdeTitles,
+  readCbIdeWorkspaceModels,
+  listCbIdeWorkspaceModels
 } from '../../collectors/codebuddy-ide'
 
 /**
@@ -103,7 +105,6 @@ export class CodeBuddyAdapter extends BaseAdapter {
     if (ctx.isPaused()) return
     const dataRoot = join(appSupportDir(), 'CodeBuddyExtension', 'Data')
     const conversations = await listCbIdeConversations(dataRoot)
-    if (conversations.length === 0) return
 
     // 项目映射变动很少，5 分钟刷新一次
     if (Date.now() - this.ideProjectsAt > 300_000) {
@@ -122,7 +123,7 @@ export class CodeBuddyAdapter extends BaseAdapter {
 
     // 模型缓存变动频繁（切模型即更新），60 秒刷新一次
     if (Date.now() - this.ideModelsAt > 60_000) {
-      this.ideModels = await readCbIdeModels(
+      const fromQueue = await readCbIdeModels(
         join(
           appSupportDir(),
           'CodeBuddy CN',
@@ -132,10 +133,68 @@ export class CodeBuddyAdapter extends BaseAdapter {
           'message-queue'
         )
       )
+      // 工作区索引覆盖更大：作为兜底（message-queue 的逐条值优先）
+      const fromWorkspace = await listCbIdeWorkspaceModels(dataRoot)
+      for (const [id, model] of fromWorkspace) {
+        if (!fromQueue.has(id)) fromQueue.set(id, model)
+      }
+      this.ideModels = fromQueue
       this.ideModelsAt = Date.now()
     }
 
+    // 模型与用量索引不是同一份文件，也不一定有会话目录：
+    // 先按映射把模型同步到已有任务，再决定是否需要继续扫用量。
+    for (const [convId, model] of this.ideModels) {
+      const key = `${convId}:${model}`
+      if (this.ideModelPushed.has(key)) continue
+      this.ideModelPushed.add(key)
+      this.push({
+        tool: this.id,
+        externalSessionId: convId,
+        ts: Date.now(),
+        model,
+        tokensSource: 'unavailable',
+        skipEventLog: true,
+        dedupeKey: `cbide:model:${key}`,
+        ...emptyUsage()
+      })
+    }
+
+    if (conversations.length === 0) return
+
+    // 模型与用量索引不是同一份文件，也不一定存在会话目录：
+    // 直接按「会话 → 模型」映射推送，覆盖没有独立目录的会话。
+    for (const [convId, model] of this.ideModels) {
+      const key = `${convId}:${model}`
+      if (this.ideModelPushed.has(key)) continue
+      this.ideModelPushed.add(key)
+      this.push({
+        tool: this.id,
+        externalSessionId: convId,
+        ts: Date.now(),
+        model,
+        tokensSource: 'unavailable',
+        skipEventLog: true,
+        dedupeKey: `cbide:model:${key}`,
+        ...emptyUsage()
+      })
+    }
+
     const titlesByWs = new Map<string, Map<string, string>>()
+    const modelsByWs = new Map<string, Map<string, string>>()
+
+    // 模型优先取 message-queue（逐条请求的真实值），缺失时用工作区索引的
+    // selectedModelId 兜底 —— 后者是常驻数据，覆盖范围更大。
+    for (const conversation of conversations) {
+      let models = modelsByWs.get(conversation.workspaceIndex)
+      if (!models) {
+        models = await readCbIdeWorkspaceModels(conversation.workspaceIndex)
+        modelsByWs.set(conversation.workspaceIndex, models)
+      }
+      for (const [convId, model] of models) {
+        if (!this.ideModels.has(convId)) this.ideModels.set(convId, model)
+      }
+    }
 
     for (const conversation of conversations) {
       // 标题/项目/模型与用量索引是不同文件，先无条件同步，避免「索引没变就不补模型」
@@ -145,26 +204,27 @@ export class CodeBuddyAdapter extends BaseAdapter {
         titlesByWs.set(conversation.workspaceIndex, titles)
       }
 
-      if (this.ideMtime.get(conversation.filePath) === conversation.mtimeMs) {
-        const cachedModel = this.ideModels.get(conversation.conversationId)
-        if (cachedModel && !this.ideModelPushed.has(`${conversation.conversationId}:${cachedModel}`)) {
-          this.ideModelPushed.add(`${conversation.conversationId}:${cachedModel}`)
-          this.push({
-            tool: this.id,
-            externalSessionId: conversation.conversationId,
-            ts: Date.now(),
-            title: titles.get(conversation.conversationId),
-            project: this.ideProjects.get(conversation.conversationId),
-            model: cachedModel,
-            authoritativeTitle: true,
-            tokensSource: 'unavailable',
-            skipEventLog: true,
-            dedupeKey: `cbide:model:${conversation.conversationId}:${cachedModel}`,
-            ...emptyUsage()
-          })
-        }
-        continue
+      // 模型与用量来自不同文件：不论用量索引是否变化，都先把模型同步过去，
+      // 否则「会话没有新增请求」时它的模型永远不会被补上。
+      const model = this.ideModels.get(conversation.conversationId)
+      if (model && !this.ideModelPushed.has(`${conversation.conversationId}:${model}`)) {
+        this.ideModelPushed.add(`${conversation.conversationId}:${model}`)
+        this.push({
+          tool: this.id,
+          externalSessionId: conversation.conversationId,
+          ts: Date.now(),
+          title: titles.get(conversation.conversationId),
+          project: this.ideProjects.get(conversation.conversationId),
+          model,
+          authoritativeTitle: true,
+          tokensSource: 'unavailable',
+          skipEventLog: true,
+          dedupeKey: `cbide:model:${conversation.conversationId}:${model}`,
+          ...emptyUsage()
+        })
       }
+
+      if (this.ideMtime.get(conversation.filePath) === conversation.mtimeMs) continue
       this.ideMtime.set(conversation.filePath, conversation.mtimeMs)
 
       const requests = await readCbIdeRequests(conversation)
@@ -183,29 +243,6 @@ export class CodeBuddyAdapter extends BaseAdapter {
       if (since > maxRequestTs) since = 0
       const title = titles.get(conversation.conversationId)
       const project = this.ideProjects.get(conversation.conversationId)
-      const model = this.ideModels.get(conversation.conversationId)
-
-      // 模型信息来自插件的 message-queue 缓存，与用量索引不是同一份文件：
-      // 解析到新模型时单独推一条元信息事件，把已有任务的模型补上
-      if (model) {
-        const key = `${conversation.conversationId}:${model}`
-        if (!this.ideModelPushed.has(key)) {
-          this.ideModelPushed.add(key)
-          this.push({
-            tool: this.id,
-            externalSessionId: conversation.conversationId,
-            ts: Date.now(),
-            title,
-            project,
-            model,
-            authoritativeTitle: Boolean(title),
-            tokensSource: 'unavailable',
-            skipEventLog: true,
-            dedupeKey: `cbide:model:${key}`,
-            ...emptyUsage()
-          })
-        }
-      }
 
       for (const request of requests) {
         if (request.ts <= since) continue

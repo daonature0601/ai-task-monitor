@@ -308,3 +308,67 @@ export async function readCbIdeModels(queueDir: string): Promise<Map<string, str
 
   return map
 }
+
+/**
+ * 工作区索引里的会话模型：`conversations[].selectedModelId`。
+ *
+ * message-queue 只覆盖最近交互过的会话（临时缓存），而工作区索引是常驻的，
+ * 覆盖范围更大（本机 38/170），是模型的第二来源。
+ */
+export async function readCbIdeWorkspaceModels(
+  workspaceIndex: string
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  let raw: string
+  try {
+    raw = await fsp.readFile(workspaceIndex, 'utf8')
+  } catch {
+    return map
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return map
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed.conversations)) return map
+  for (const item of parsed.conversations) {
+    if (!isRecord(item)) continue
+    const id = typeof item.id === 'string' ? item.id : ''
+    const model = typeof item.selectedModelId === 'string' ? item.selectedModelId : ''
+    if (id && model) map.set(id, model)
+  }
+  return map
+}
+
+/**
+ * 扫描所有工作区索引，汇总「会话 → 模型」。
+ * 不依赖会话目录是否存在（有些会话只有工作区索引里的一条记录），
+ * 因此覆盖面比逐会话扫描更大。
+ */
+export async function listCbIdeWorkspaceModels(root: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+
+  const visit = async (dir: string, depth: number): Promise<void> => {
+    if (depth < 0) return
+    let entries
+    try {
+      entries = await fsp.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === 'messages' || entry.name === 'check-point') continue
+        await visit(full, depth - 1)
+      } else if (entry.name === 'index.json') {
+        const models = await readCbIdeWorkspaceModels(full)
+        for (const [id, model] of models) if (!map.has(id)) map.set(id, model)
+      }
+    }
+  }
+
+  await visit(root, 7)
+  return map
+}
