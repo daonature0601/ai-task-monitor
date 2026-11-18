@@ -94,6 +94,8 @@ export class BatchWriter {
         upsertTasks(db, dirty)
         taskCount = dirty.length
       }
+      // 轮次先落库：turnStart 要闭合上一条并插入新行，turnEnd 闭合当前行
+      this.flushTurns(db)
       if (pending.length > 0) {
         events = insertUsageEvents(db, pending)
         this.insertedTotal += events

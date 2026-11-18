@@ -119,7 +119,9 @@ export class TaskMachine {
     // 乱序 / 历史回填：事件明显早于当前活动段的起点（例如合并进来的子代理
     // 昨天写的日志），不能塞进今天正在进行的任务，否则时间线会出现"昨天的时间"。
     // 这类事件按「天」聚合到独立的历史任务里。
-    if (task && eventTs < task.startedAt - BURST_GAP_MS) {
+    // keepSession 的数据源（一次对话一个任务）不做历史回填切分，
+    // 否则同一会话会被拆成 base 与 ~h<day> 多条任务，轮次也被拆散
+    if (task && !delta.keepSession && eventTs < task.startedAt - BURST_GAP_MS) {
       isBackfill = true
       taskId = `${baseId}~h${dayKey(eventTs)}`
       task = this.tasks.get(taskId)

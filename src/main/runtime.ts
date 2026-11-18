@@ -43,7 +43,7 @@ import { buildSnapshot } from './core/snapshot'
 import { evaluateTask } from './core/alerts'
 import type { CursorStore } from './collectors/jsonl-tailer'
 
-const EVENTS_COST_VERSION = 13
+const EVENTS_COST_VERSION = 15
 
 export interface RuntimeHooks {
   onSnapshot: (snapshot: SnapshotPayload) => void
@@ -148,6 +148,20 @@ export function createRuntime(
   // 造成「任务累计 token ≠ 事件总量」。事件必须挂在存在的任务上。
   const orphans = db.prepare('DELETE FROM usage_events WHERE task_id NOT IN (SELECT id FROM tasks)').run()
   if (orphans.changes > 0) console.log(`[db] removed ${orphans.changes} orphan events`)
+
+  // 补齐「当前这一轮」：轮次表是按源日志重建的，进行中的那一轮往往还没落盘，
+  // 这里用车任务上的本轮边界补一条，保证抽屉的轮次首行 = 上方「本轮」。
+  const repaired = db
+    .prepare(
+      `INSERT OR IGNORE INTO task_turns (task_id, started_at, ended_at)
+       SELECT t.id, t.turn_started_at, t.turn_ended_at
+         FROM tasks t
+        WHERE t.turn_started_at IS NOT NULL
+          AND t.turn_started_at > COALESCE(
+            (SELECT MAX(tt.started_at) FROM task_turns tt WHERE tt.task_id = t.id), 0)`
+    )
+    .run()
+  if (repaired.changes > 0) console.log(`[turns] restored ${repaired.changes} current turns`)
 
   // 事件级费用回填：必须在 hydrate 之前完成 —— 否则内存里装载的是旧的任务费用，
   // 下一次落盘又会把它写回去，重算等于没做。
@@ -330,7 +344,32 @@ export function createRuntime(
       if (!row) return null
       // 详情与列表必须同口径：本轮用量按事件时间重算，否则抽屉里的「本轮」会与列表不一致
       const [task] = attachTurnStats(db, [enrich(rowToSnapshot(row))])
-      return { task, events: listEventsForTask(db, id, 300), turns: listTaskTurns(db, id) }
+      // 兜底：轮次表里没有「当前这一轮」时补一条，避免上方显示本轮、下方列表却没有它
+      let turns = listTaskTurns(db, id)
+      const currentStart = task.turnStartedAt
+      if (currentStart && (!turns[0] || turns[0].startedAt < currentStart)) {
+        db.prepare('INSERT OR IGNORE INTO task_turns (task_id, started_at, ended_at) VALUES (?, ?, ?)').run(
+          id,
+          currentStart,
+          task.turnEndedAt ?? null
+        )
+        turns = listTaskTurns(db, id)
+      }
+      const latest = turns[0]
+      // 「本轮」即最新一轮：源日志可能已经开新轮，而任务行还停在上一条，
+      // 这里以轮次表为准，避免上方「本轮」与下方首行显示不同的两轮。
+      // 无条件以轮次表首行为「本轮」：源日志可能比任务行滞后，两边各取一套
+      // 就会出现「上面 14:33、下面 14:26」的矛盾。列表与详情必须同一行数据。
+      if (latest) {
+        task.turnStartedAt = latest.startedAt
+        task.turnEndedAt = latest.endedAt ?? task.turnEndedAt
+        task.turnInputTokens = latest.inputTokens
+        task.turnOutputTokens = latest.outputTokens
+        task.turnCacheReadTokens = latest.cacheReadTokens
+        task.turnCacheWriteTokens = latest.cacheWriteTokens
+        task.turnCostUsd = latest.costUsd
+      }
+      return { task, events: listEventsForTask(db, id, 300), turns }
     },
     getStats: (from, to) => buildStats(db, from, to),
     bridgeStatus: () => bridge.status(),

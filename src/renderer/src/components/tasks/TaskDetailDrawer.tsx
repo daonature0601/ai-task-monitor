@@ -41,16 +41,22 @@ export function TaskDetailDrawer(): JSX.Element | null {
     }
     let disposed = false
     setLoading(true)
-    window.monitor
-      .getTaskDetail(taskId)
-      .then((result) => {
-        if (!disposed) setDetail(result)
-      })
-      .finally(() => {
-        if (!disposed) setLoading(false)
-      })
+    const load = (): void => {
+      window.monitor
+        .getTaskDetail(taskId)
+        .then((result) => {
+          if (!disposed) setDetail(result)
+        })
+        .finally(() => {
+          if (!disposed) setLoading(false)
+        })
+    }
+    load()
+    // 事件是持续落库的，打开期间定时刷新，避免看到旧数字
+    const timer = window.setInterval(load, 5_000)
     return () => {
       disposed = true
+      window.clearInterval(timer)
     }
   }, [taskId])
 
@@ -60,7 +66,27 @@ export function TaskDetailDrawer(): JSX.Element | null {
     return snapshot.tasks.find((t) => t.id === taskId) ?? null
   }, [taskId, snapshot])
 
-  const task = liveTask ?? detail?.task ?? null
+  // 用量必须与列表同源（都来自 DB 的事件的聚合）；实时快照只补充时间与状态，
+  // 否则内存里的计数一旦与库不一致，同一任务在两个地方会显示不同数字。
+  const task = useMemo(() => {
+    if (detail?.task) {
+      if (!liveTask) return detail.task
+      return {
+        ...detail.task,
+        status: liveTask.status,
+        turnStartedAt: liveTask.turnStartedAt,
+        turnEndedAt: liveTask.turnEndedAt,
+        lastEventAt: liveTask.lastEventAt
+      }
+    }
+    return liveTask
+  }, [detail, liveTask])
+
+  // 轮次耗时与上方「本轮耗时」同一回退链：未闭合时用本轮的结束时间
+  const turnSpan = (turn: { startedAt: number; endedAt: number | null }): number => {
+    const end = turn.endedAt ?? task?.turnEndedAt ?? task?.lastEventAt ?? turn.startedAt
+    return Math.max(0, end - turn.startedAt)
+  }
 
   const series = useMemo(() => {
     const events = detail?.events ?? []
@@ -268,7 +294,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
                           #{(detail?.turns ?? []).length - index} · {formatTimeShort(turn.startedAt)}
                         </span>
                         <span className="num text-fg-lo">
-                          {formatDuration((turn.endedAt ?? turn.startedAt) - turn.startedAt)}
+                          {formatDuration(turnSpan(turn))}
                         </span>
                         <span className="num text-fg-mid">
                           {formatTokens(turn.inputTokens)} in / {formatTokens(turn.outputTokens)} out

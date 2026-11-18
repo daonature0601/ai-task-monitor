@@ -162,7 +162,27 @@ export function getTaskRow(db: Database.Database, id: string): TaskRow | null {
  */
 export function attachTurnStats(db: Database.Database, rows: TaskSnapshot[]): TaskSnapshot[] {
   if (rows.length === 0) return rows
-  const stmt = db.prepare(
+
+  // 与轮次表对齐：列表、卡片、详情都取「最新一轮」这一行，
+  // 不能一个用 turn_started_at、一个用 task_turns 首行 —— 源日志滞后时会分成两轮。
+  const latestTurn = db.prepare(
+    `SELECT started_at, ended_at
+       FROM task_turns
+      WHERE task_id = ?
+      ORDER BY started_at DESC
+      LIMIT 1`
+  )
+  const latestUsage = db.prepare(
+    `SELECT COALESCE(SUM(e.input_tokens), 0) AS i,
+            COALESCE(SUM(e.output_tokens), 0) AS o,
+            COALESCE(SUM(e.cache_read_tokens), 0) AS r,
+            COALESCE(SUM(e.cache_write_tokens), 0) AS w,
+            COALESCE(SUM(e.cost_usd), 0) AS c
+       FROM usage_events e
+      WHERE e.task_id = ? AND e.ts >= ? AND e.ts < ?`
+  )
+  // 没有轮次行的历史任务，回落到任务上保存的本轮边界
+  const fallbackUsage = db.prepare(
     `SELECT COALESCE(SUM(e.input_tokens), 0) AS i,
             COALESCE(SUM(e.output_tokens), 0) AS o,
             COALESCE(SUM(e.cache_read_tokens), 0) AS r,
@@ -171,8 +191,22 @@ export function attachTurnStats(db: Database.Database, rows: TaskSnapshot[]): Ta
        FROM usage_events e JOIN tasks t ON t.id = e.task_id
       WHERE e.task_id = ? AND e.ts >= COALESCE(t.turn_started_at, 0)`
   )
+  const MAX = 9223372036854775807
+
   for (const row of rows) {
-    const agg = stmt.get(row.id) as { i: number; o: number; r: number; w: number; c: number } | undefined
+    const turn = latestTurn.get(row.id) as { started_at: number; ended_at: number | null } | undefined
+    if (turn) {
+      row.turnStartedAt = turn.started_at
+      // 轮次还没闭合时保留任务上的本轮结束时间，别清成 undefined —— 
+      // 否则回落到较早的 endedAt，耗时算成 0
+      row.turnEndedAt = turn.ended_at ?? row.turnEndedAt
+    }
+    const start = turn?.started_at ?? row.turnStartedAt
+    const agg = (turn
+      ? latestUsage.get(row.id, start, turn.ended_at ?? MAX)
+      : fallbackUsage.get(row.id)) as
+      | { i: number; o: number; r: number; w: number; c: number }
+      | undefined
     if (!agg) continue
     row.turnInputTokens = agg.i
     row.turnOutputTokens = agg.o

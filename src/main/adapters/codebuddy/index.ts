@@ -176,7 +176,11 @@ export class CodeBuddyAdapter extends BaseAdapter {
 
       const cursorKey = `cbide:${conversation.filePath}`
       const cursor = ctx.cursors.get(cursorKey)
-      const since = cursor?.offset ?? 0
+      // 游标存的是「已处理的最大请求时间」，但历史版本写过文件 mtime（更大），
+      // 会导致后续请求全部被判定为「已处理」而永久跳过 —— 这里检测到异常值就重置。
+      const maxRequestTs = requests[requests.length - 1].ts
+      let since = cursor?.offset ?? 0
+      if (since > maxRequestTs) since = 0
       const title = titles.get(conversation.conversationId)
       const project = this.ideProjects.get(conversation.conversationId)
       const model = this.ideModels.get(conversation.conversationId)
@@ -250,7 +254,8 @@ export class CodeBuddyAdapter extends BaseAdapter {
 
       if (this.ideFingerprints.size > 200_000) this.ideFingerprints.clear()
       const maxTs = Math.max(requests[requests.length - 1].ts, last.endTs)
-      ctx.cursors.set(cursorKey, Math.max(since, maxTs), null, conversation.mtimeMs)
+      // 只记录请求自身的时间：用文件 mtime 会把「之后写入的请求」误判为已处理
+      ctx.cursors.set(cursorKey, Math.max(requests[requests.length - 1].ts, since), null, conversation.mtimeMs)
     }
   }
 

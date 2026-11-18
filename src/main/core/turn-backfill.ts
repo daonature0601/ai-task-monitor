@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 9
+export const TURNS_VERSION = 18
 
 interface Span {
   tool: string
@@ -56,6 +56,8 @@ async function walkFiles(root: string, depth: number): Promise<string[]> {
 async function readJsonl(path: string): Promise<Array<Record<string, unknown>>> {
   let raw: string
   try {
+    const stat = await fsp.stat(path)
+    if (stat.size > 128 * 1024 * 1024) return []
     raw = await fsp.readFile(path, 'utf8')
   } catch {
     return []
@@ -108,9 +110,32 @@ async function codebuddyIdeSpans(): Promise<Span[]> {
   const conversations = await listCbIdeConversations(root)
   const spans: Span[] = []
   for (const conversation of conversations) {
-    const requests = await readCbIdeRequests(conversation)
-    if (requests.length === 0) continue
-    spans.push(...fromStarts(requests.map((item) => item.ts), conversation.mtimeMs, 'codebuddy', conversation.conversationId))
+    // 轮次只看请求本身：即使这一次请求的用量为 0（中断 / 空回复），
+    // 它依然代表一次用户输入，必须计入轮次。
+    let raw: string
+    try {
+      raw = await fsp.readFile(conversation.filePath, 'utf8')
+    } catch {
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      continue
+    }
+    if (!parsed || typeof parsed !== 'object') continue
+    const requests = Array.isArray((parsed as Record<string, unknown>).requests)
+      ? ((parsed as Record<string, unknown>).requests as unknown[])
+      : []
+    const starts: number[] = []
+    for (const item of requests) {
+      if (!item || typeof item !== 'object') continue
+      const record = item as Record<string, unknown>
+      const ts = tsOf(record.startedAt) || tsOf(record.timestamp)
+      if (ts) starts.push(ts)
+    }
+    spans.push(...fromStarts(starts, conversation.mtimeMs, 'codebuddy', conversation.conversationId))
   }
   return spans
 }
@@ -119,10 +144,13 @@ async function workbuddySpans(sessionIds: Set<string>): Promise<Span[]> {
   const root = join(homePath('.workbuddy'), 'projects')
   const files = await walkFiles(root, 4)
   const spans: Span[] = []
+  let matched = 0
+  let users = 0
   for (const file of files) {
     if (!file.endsWith('.jsonl')) continue
     const stem = basename(file, '.jsonl')
     if (!sessionIds.has(stem)) continue
+    matched += 1
     const lines = await readJsonl(file)
     const starts: number[] = []
     let last = 0
@@ -131,10 +159,14 @@ async function workbuddySpans(sessionIds: Set<string>): Promise<Span[]> {
       const ts = tsOf(line.timestamp)
       if (!ts) continue
       last = Math.max(last, ts)
-      if (str(line.role) === 'user') starts.push(ts)
+      if (str(line.role) === 'user') {
+        starts.push(ts)
+        users += 1
+      }
     }
     spans.push(...fromStarts(starts, last || null, 'workbuddy', stem))
   }
+  console.log(`[turns] workbuddy files=${files.length} matched=${matched} users=${users}`)
   return spans
 }
 
@@ -293,23 +325,23 @@ export async function rebuildTaskTurns(db: Database.Database): Promise<{ spans: 
   }
 
   const spans: Span[] = []
-  const collectors: Array<Promise<Span[]>> = [
-    codebuddyIdeSpans(),
-    dshSpans(),
-    workbuddySpans(idsByTool.get('workbuddy') ?? new Set()),
-    codexSpans(idsByTool.get('codex') ?? new Set()),
-    claudeSpans(idsByTool.get('claude-code') ?? new Set())
+  const collectors: Array<() => Promise<Span[]>> = [
+    () => codebuddyIdeSpans(),
+    () => dshSpans(),
+    () => workbuddySpans(idsByTool.get('workbuddy') ?? new Set()),
+    () => codexSpans(idsByTool.get('codex') ?? new Set()),
+    () => claudeSpans(idsByTool.get('claude-code') ?? new Set())
   ]
   const names = ['codebuddy', 'deepseek-harness', 'workbuddy', 'codex', 'claude-code']
-  const settled = await Promise.allSettled(collectors)
-  settled.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      spans.push(...result.value)
-      console.log(`[turns] ${names[index]}: ${result.value.length} spans`)
-    } else {
-      console.error(`[turns] ${names[index]} failed:`, result.reason)
+  for (let index = 0; index < collectors.length; index += 1) {
+    try {
+      const value = await collectors[index]()
+      spans.push(...value)
+      console.log(`[turns] ${names[index]}: ${value.length} spans`)
+    } catch (error) {
+      console.error(`[turns] ${names[index]} failed:`, error)
     }
-  })
+  }
 
   const spansByKey = new Map<string, Span[]>()
   for (const span of spans) {
@@ -330,6 +362,8 @@ export async function rebuildTaskTurns(db: Database.Database): Promise<{ spans: 
 
   const insert = db.prepare('INSERT INTO task_turns (task_id, started_at, ended_at) VALUES (?, ?, ?)')
   const touched = new Set<string>()
+  /** 每个任务已写入的最大轮次起点，用来补「当前这一轮」 */
+  const maxStart = new Map<string, number>()
   let rows = 0
   db.transaction(() => {
     db.prepare('DELETE FROM task_turns').run()
@@ -351,6 +385,7 @@ export async function rebuildTaskTurns(db: Database.Database): Promise<{ spans: 
         }
         insert.run(target.id, span.start, span.end ?? null)
         touched.add(target.id)
+        maxStart.set(target.id, Math.max(maxStart.get(target.id) ?? 0, span.start))
         rows += 1
       }
     }
@@ -359,6 +394,15 @@ export async function rebuildTaskTurns(db: Database.Database): Promise<{ spans: 
     for (const task of tasks) {
       if (touched.has(task.id)) continue
       insert.run(task.id, task.turn_started_at ?? task.started_at, task.turn_ended_at ?? null)
+      maxStart.set(task.id, task.turn_started_at ?? task.started_at)
+      rows += 1
+    }
+    // 源日志还没落盘的「当前这一轮」：任务行上已经有比所有源轮次更新的起点，
+    // 补一条，否则抽屉里上面显示本轮、下面轮次列表却没有这一条。
+    for (const task of tasks) {
+      const currentStart = task.turn_started_at ?? task.started_at
+      if (currentStart <= (maxStart.get(task.id) ?? 0)) continue
+      insert.run(task.id, currentStart, task.turn_ended_at ?? null)
       rows += 1
     }
   })()
