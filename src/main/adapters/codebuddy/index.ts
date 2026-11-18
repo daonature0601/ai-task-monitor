@@ -9,6 +9,7 @@ import { TOOL_PATHS, appSupportDir, firstExisting } from '../../collectors/paths
 import { isInstalled } from '../../collectors/process-probe'
 import {
   listCbIdeConversations,
+  readCbIdeModels,
   readCbIdeProjects,
   readCbIdeRequests,
   readCbIdeTitles
@@ -38,6 +39,11 @@ export class CodeBuddyAdapter extends BaseAdapter {
   /** convId → 项目名 */
   private ideProjects = new Map<string, string>()
   private ideProjectsAt = 0
+  /** 会话 → 模型（来自插件 message-queue 缓存） */
+  private ideModels = new Map<string, string>()
+  private ideModelsAt = 0
+  /** 已推送过的「会话:模型」，避免每轮扫描重复发事件 */
+  private readonly ideModelPushed = new Set<string>()
   /** 已计入的请求指纹：同一会话的多个副本（切号复制）只算一次 */
   private readonly ideFingerprints = new Set<string>()
   /** 上一轮仍然活跃的对话 id，用于发结束信号 */
@@ -114,17 +120,52 @@ export class CodeBuddyAdapter extends BaseAdapter {
       this.ideProjectsAt = Date.now()
     }
 
+    // 模型缓存变动频繁（切模型即更新），60 秒刷新一次
+    if (Date.now() - this.ideModelsAt > 60_000) {
+      this.ideModels = await readCbIdeModels(
+        join(
+          appSupportDir(),
+          'CodeBuddy CN',
+          'User',
+          'globalStorage',
+          'tencent-cloud.coding-copilot',
+          'message-queue'
+        )
+      )
+      this.ideModelsAt = Date.now()
+    }
+
     const titlesByWs = new Map<string, Map<string, string>>()
 
     for (const conversation of conversations) {
-      if (this.ideMtime.get(conversation.filePath) === conversation.mtimeMs) continue
-      this.ideMtime.set(conversation.filePath, conversation.mtimeMs)
-
+      // 标题/项目/模型与用量索引是不同文件，先无条件同步，避免「索引没变就不补模型」
       let titles = titlesByWs.get(conversation.workspaceIndex)
       if (!titles) {
         titles = await readCbIdeTitles(conversation.workspaceIndex)
         titlesByWs.set(conversation.workspaceIndex, titles)
       }
+
+      if (this.ideMtime.get(conversation.filePath) === conversation.mtimeMs) {
+        const cachedModel = this.ideModels.get(conversation.conversationId)
+        if (cachedModel && !this.ideModelPushed.has(`${conversation.conversationId}:${cachedModel}`)) {
+          this.ideModelPushed.add(`${conversation.conversationId}:${cachedModel}`)
+          this.push({
+            tool: this.id,
+            externalSessionId: conversation.conversationId,
+            ts: Date.now(),
+            title: titles.get(conversation.conversationId),
+            project: this.ideProjects.get(conversation.conversationId),
+            model: cachedModel,
+            authoritativeTitle: true,
+            tokensSource: 'unavailable',
+            skipEventLog: true,
+            dedupeKey: `cbide:model:${conversation.conversationId}:${cachedModel}`,
+            ...emptyUsage()
+          })
+        }
+        continue
+      }
+      this.ideMtime.set(conversation.filePath, conversation.mtimeMs)
 
       const requests = await readCbIdeRequests(conversation)
       if (requests.length === 0) continue
@@ -138,6 +179,29 @@ export class CodeBuddyAdapter extends BaseAdapter {
       const since = cursor?.offset ?? 0
       const title = titles.get(conversation.conversationId)
       const project = this.ideProjects.get(conversation.conversationId)
+      const model = this.ideModels.get(conversation.conversationId)
+
+      // 模型信息来自插件的 message-queue 缓存，与用量索引不是同一份文件：
+      // 解析到新模型时单独推一条元信息事件，把已有任务的模型补上
+      if (model) {
+        const key = `${conversation.conversationId}:${model}`
+        if (!this.ideModelPushed.has(key)) {
+          this.ideModelPushed.add(key)
+          this.push({
+            tool: this.id,
+            externalSessionId: conversation.conversationId,
+            ts: Date.now(),
+            title,
+            project,
+            model,
+            authoritativeTitle: Boolean(title),
+            tokensSource: 'unavailable',
+            skipEventLog: true,
+            dedupeKey: `cbide:model:${key}`,
+            ...emptyUsage()
+          })
+        }
+      }
 
       for (const request of requests) {
         if (request.ts <= since) continue
@@ -150,6 +214,7 @@ export class CodeBuddyAdapter extends BaseAdapter {
           ts: request.ts,
           title,
           project,
+          model,
           authoritativeTitle: Boolean(title),
           inputTokens: request.usage.input,
           outputTokens: request.usage.output,

@@ -41,7 +41,7 @@ import { buildSnapshot } from './core/snapshot'
 import { evaluateTask } from './core/alerts'
 import type { CursorStore } from './collectors/jsonl-tailer'
 
-const EVENTS_COST_VERSION = 11
+const EVENTS_COST_VERSION = 12
 
 export interface RuntimeHooks {
   onSnapshot: (snapshot: SnapshotPayload) => void

@@ -257,3 +257,54 @@ function decodeWorkspace(name: string): string | null {
   }
   return tryDecode(name) ?? tryDecode(name.replace(/_/g, '/')) ?? tryDecode(name.replace(/_/g, '+'))
 }
+
+/**
+ * 会话 → 模型。
+ *
+ * CodeBuddy IDE 的会话索引（history/<ws>/<conv>/index.json）只有用量没有模型，
+ * 但插件会把「待发送 / 最近」的消息缓存在
+ *   globalStorage/tencent-cloud.coding-copilot/message-queue/<wsHash>.json
+ * 每个会话的 items[].modelId 就是这一轮实际使用的模型（如 deepseek-v4.1-flash-ioa）。
+ *
+ * 该缓存只覆盖最近使用过的会话，取不到时保持「模型未知」，不做猜测。
+ */
+export async function readCbIdeModels(queueDir: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  let names: string[]
+  try {
+    names = await fsp.readdir(queueDir)
+  } catch {
+    return map
+  }
+
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue
+    let raw: string
+    try {
+      raw = await fsp.readFile(join(queueDir, name), 'utf8')
+    } catch {
+      continue
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      continue
+    }
+    if (!isRecord(parsed) || !isRecord(parsed.conversations)) continue
+
+    for (const [conversationId, value] of Object.entries(parsed.conversations)) {
+      if (!isRecord(value) || !Array.isArray(value.items)) continue
+      // 取最后一条带 modelId 的记录：同一会话里模型可能被切换过
+      let model: string | undefined
+      for (const item of value.items) {
+        if (!isRecord(item)) continue
+        const id = typeof item.modelId === 'string' ? item.modelId.trim() : ''
+        if (id) model = id
+      }
+      if (model) map.set(conversationId, model)
+    }
+  }
+
+  return map
+}
