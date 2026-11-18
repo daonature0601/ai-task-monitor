@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 22
+export const TURNS_VERSION = 23
 
 interface Span {
   tool: string
@@ -134,7 +134,16 @@ async function codebuddyIdeSpans(): Promise<Span[]> {
       if (!item || typeof item !== 'object') continue
       const record = item as Record<string, unknown>
       const ts = tsOf(record.startedAt) || tsOf(record.timestamp)
-      if (ts) starts.push(ts)
+      if (!ts) continue
+      // 被中断的请求会留下一条 0 用量的记录：它没有内容可展示，
+      // 也会在轮次历史里出现「16:23 · 0 in / 0 out」这种空行，直接跳过。
+      const usage = record.usage
+      const total = usage && typeof usage === 'object'
+        ? ['inputTokens', 'outputTokens', 'cacheTokens', 'cachedMissTokens', 'cachedWriteTokens']
+            .reduce((sum, key) => sum + ((usage as Record<string, unknown>)[key] as number || 0), 0)
+        : 0
+      if (total <= 0) continue
+      starts.push(ts)
     }
     spans.push(...fromStarts(starts, conversation.mtimeMs, 'codebuddy', conversation.conversationId))
   }
