@@ -21,6 +21,7 @@ import {
 } from './db/repositories/settings'
 import { getCursor, pruneCursors, setCursor } from './db/repositories/cursors'
 import {
+  attachTurnStats,
   deleteTasksBefore,
   getTaskRow,
   listRecentTasks,
@@ -326,7 +327,8 @@ export function createRuntime(
     getTaskDetail: (id) => {
       const row = getTaskRow(db, id)
       if (!row) return null
-      const task = enrich(rowToSnapshot(row))
+      // 详情与列表必须同口径：本轮用量按事件时间重算，否则抽屉里的「本轮」会与列表不一致
+      const [task] = attachTurnStats(db, [enrich(rowToSnapshot(row))])
       return { task, events: listEventsForTask(db, id, 300) }
     },
     getStats: (from, to) => buildStats(db, from, to),

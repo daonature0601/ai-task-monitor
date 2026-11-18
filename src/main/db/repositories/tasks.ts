@@ -160,7 +160,7 @@ export function getTaskRow(db: Database.Database, id: string): TaskRow | null {
  * 列表展示的是「本轮」用量：只统计 turn_started_at 之后写入的事件。
  * 任务的会话累计值仍在 tasks 表里，详情抽屉使用它。
  */
-function attachTurnStats(db: Database.Database, rows: TaskSnapshot[]): TaskSnapshot[] {
+export function attachTurnStats(db: Database.Database, rows: TaskSnapshot[]): TaskSnapshot[] {
   if (rows.length === 0) return rows
   const stmt = db.prepare(
     `SELECT COALESCE(SUM(e.input_tokens), 0) AS i,
