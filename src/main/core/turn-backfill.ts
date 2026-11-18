@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 23
+export const TURNS_VERSION = 25
 
 interface Span {
   tool: string
@@ -129,23 +129,33 @@ async function codebuddyIdeSpans(): Promise<Span[]> {
     const requests = Array.isArray((parsed as Record<string, unknown>).requests)
       ? ((parsed as Record<string, unknown>).requests as unknown[])
       : []
-    const starts: number[] = []
+    // 与 CodeBuddy 对齐：一轮的结束取「下一条请求的起点」，最后一条用文件 mtime。
+    // （请求自身只有 startedAt，没有完成时间；实测这样 16:42、16:33 等轮次逐秒一致）
+    const points: number[] = []
     for (const item of requests) {
       if (!item || typeof item !== 'object') continue
       const record = item as Record<string, unknown>
       const ts = tsOf(record.startedAt) || tsOf(record.timestamp)
       if (!ts) continue
-      // 被中断的请求会留下一条 0 用量的记录：它没有内容可展示，
-      // 也会在轮次历史里出现「16:23 · 0 in / 0 out」这种空行，直接跳过。
       const usage = record.usage
       const total = usage && typeof usage === 'object'
         ? ['inputTokens', 'outputTokens', 'cacheTokens', 'cachedMissTokens', 'cachedWriteTokens']
-            .reduce((sum, key) => sum + ((usage as Record<string, unknown>)[key] as number || 0), 0)
+            .reduce((sum, key) => sum + (((usage as Record<string, unknown>)[key] as number) || 0), 0)
         : 0
       if (total <= 0) continue
-      starts.push(ts)
+      points.push(ts)
     }
-    spans.push(...fromStarts(starts, conversation.mtimeMs, 'codebuddy', conversation.conversationId))
+    points.sort((a, b) => a - b)
+    for (let index = 0; index < points.length; index += 1) {
+      spans.push({
+        tool: 'codebuddy',
+        sessionId: conversation.conversationId,
+        start: points[index],
+        end: points[index + 1] ?? conversation.mtimeMs
+      })
+    }
+    continue
+    continue
   }
 
   return spans
