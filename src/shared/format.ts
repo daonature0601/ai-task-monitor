@@ -25,6 +25,14 @@ export function formatDurationShort(ms: number): string {
 }
 
 /** <1000 原值；>=1000 → 12.4K；>=1000000 → 1.23M */
+/**
+ * 展示口径：对齐 CodeBuddy 自身的「输入」= 缓存命中 + 缓存未命中。
+ * 计价与统计仍用两者分开的原始字段，避免重复计入。
+ */
+export function displayInput(inputTokens: number, cacheReadTokens: number): number {
+  return (inputTokens ?? 0) + (cacheReadTokens ?? 0)
+}
+
 export function formatTokens(n: number): string {
   const v = Number.isFinite(n) ? n : 0
   if (Math.abs(v) < 1000) return String(Math.round(v))

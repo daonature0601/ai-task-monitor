@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 18
+export const TURNS_VERSION = 22
 
 interface Span {
   tool: string
@@ -109,9 +109,10 @@ async function codebuddyIdeSpans(): Promise<Span[]> {
   const root = join(appSupportDir(), 'CodeBuddyExtension', 'Data')
   const conversations = await listCbIdeConversations(root)
   const spans: Span[] = []
+
+  // 与 CodeBuddy 自身的显示对齐：一轮 = 一次完成的请求。
+  // 被用户意外中断的那些提问不会生成 request，CodeBuddy 里也不显示，这里同样不计。
   for (const conversation of conversations) {
-    // 轮次只看请求本身：即使这一次请求的用量为 0（中断 / 空回复），
-    // 它依然代表一次用户输入，必须计入轮次。
     let raw: string
     try {
       raw = await fsp.readFile(conversation.filePath, 'utf8')
@@ -137,6 +138,7 @@ async function codebuddyIdeSpans(): Promise<Span[]> {
     }
     spans.push(...fromStarts(starts, conversation.mtimeMs, 'codebuddy', conversation.conversationId))
   }
+
   return spans
 }
 

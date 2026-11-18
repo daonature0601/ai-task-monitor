@@ -10,7 +10,8 @@ import {
   formatTokens,
   formatTokensFull,
   STATUS_HINT,
-  STATUS_LABEL
+  STATUS_LABEL,
+  displayInput
 } from '@shared/format'
 import { cn, statusTone, toolName } from '../../lib/utils'
 import { StatusDot, ToolAvatar } from '../ui/atoms'
@@ -103,8 +104,8 @@ export function TaskTable({
                 <td className="num px-3 py-2.5 text-caption text-fg-mid">
                   {formatDuration(elapsed)}
                 </td>
-                <td className="num px-3 py-2.5 text-right text-fg-mid" title={formatTokensFull(task.turnInputTokens)}>
-                  {formatTokens(task.turnInputTokens)}
+                <td className="num px-3 py-2.5 text-right text-fg-mid" title={formatTokensFull(displayInput(task.turnInputTokens, task.turnCacheReadTokens))}>
+                  {formatTokens(displayInput(task.turnInputTokens, task.turnCacheReadTokens))}
                 </td>
                 <td className="num px-3 py-2.5 text-right text-fg-mid" title={formatTokensFull(task.outputTokens)}>
                   {formatTokens(task.turnOutputTokens)}

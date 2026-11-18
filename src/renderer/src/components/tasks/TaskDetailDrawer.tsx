@@ -15,7 +15,8 @@ import {
   formatTokensFull,
   SOURCE_LABEL,
   STATUS_LABEL,
-  computeCacheHitRate
+  computeCacheHitRate,
+  displayInput
 } from '@shared/format'
 import { useMonitor } from '../../store/monitor'
 import { useNow } from '../../hooks/useTicker'
@@ -183,7 +184,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
               <div>
                 <p className="label-xs mb-2">本轮</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <Metric label="输入 Token" value={formatTokensFull(task.turnInputTokens)} mono />
+                  <Metric label="输入 Token" value={formatTokensFull(displayInput(task.turnInputTokens, task.turnCacheReadTokens))} mono hint="含缓存命中，与 CodeBuddy 口径一致" />
                   <Metric label="输出 Token" value={formatTokensFull(task.turnOutputTokens)} mono />
                   <Metric
                     label="缓存命中"
@@ -207,7 +208,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
               <div>
                 <p className="label-xs mb-2">会话累计</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <Metric label="输入 Token" value={formatTokensFull(task.inputTokens)} mono />
+                  <Metric label="输入 Token" value={formatTokensFull(displayInput(task.inputTokens, task.cacheReadTokens))} mono hint="含缓存命中" />
                   <Metric label="输出 Token" value={formatTokensFull(task.outputTokens)} mono />
                   <Metric label="缓存命中" value={formatRate(task.cacheHitRate)} mono />
                 <Metric
@@ -297,7 +298,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
                           {formatDuration(turnSpan(turn))}
                         </span>
                         <span className="num text-fg-mid">
-                          {formatTokens(turn.inputTokens)} in / {formatTokens(turn.outputTokens)} out
+                          {formatTokens(displayInput(turn.inputTokens, turn.cacheReadTokens))} in / {formatTokens(turn.outputTokens)} out
                         </span>
                         <span className="num text-fg-lo">
                           {formatRate(

@@ -9,7 +9,8 @@ import {
   formatTokens,
   STATUS_HINT,
   STATUS_LABEL,
-  computeCacheHitRate
+  computeCacheHitRate,
+  displayInput
 } from '@shared/format'
 import { cn, statusTone } from '../../lib/utils'
 import { Badge, StatusDot, ToolAvatar } from '../ui/atoms'
@@ -91,7 +92,7 @@ export function LiveTaskCard({
       </div>
 
       <div className="mt-3.5 grid grid-cols-4 gap-2">
-        <Stat icon={<Hash size={10} />} label="输入" value={formatTokens(task.turnInputTokens)} accent="text-accent-cyan" />
+        <Stat icon={<Hash size={10} />} label="输入" value={formatTokens(displayInput(task.turnInputTokens, task.turnCacheReadTokens))} accent="text-accent-cyan" />
         <Stat label="输出" value={formatTokens(task.turnOutputTokens)} accent="text-accent-teal" />
         <Stat
           label="缓存命中"
