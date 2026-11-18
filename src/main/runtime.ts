@@ -146,6 +146,27 @@ export function createRuntime(
     console.error('[runtime] align codex titles failed', error)
   }
 
+  // 空轮次清理：历史上同一秒的重试请求会留下「窗口内没有任何事件」的行，
+  // 它们在轮次历史里显示成「0 in / 0 out」。只删除有同秒兄弟且自身无事件的行。
+  const pruned = db
+    .prepare(
+      `DELETE FROM task_turns
+        WHERE NOT EXISTS (
+                SELECT 1 FROM usage_events e
+                 WHERE e.task_id = task_turns.task_id
+                   AND e.ts >= task_turns.started_at
+                   AND e.ts < COALESCE(task_turns.ended_at, 9223372036854775807)
+              )
+          AND EXISTS (
+                SELECT 1 FROM task_turns t2
+                 WHERE t2.task_id = task_turns.task_id
+                   AND t2.rowid <> task_turns.rowid
+                   AND ABS(t2.started_at - task_turns.started_at) < 3000
+              )`
+    )
+    .run()
+  if (pruned.changes > 0) console.log(`[turns] pruned ${pruned.changes} empty turns`)
+
   // 孤儿事件清理：任务被删除（重建索引、手工清理）后，它的用量流水会留在表里，
   // 造成「任务累计 token ≠ 事件总量」。事件必须挂在存在的任务上。
   const orphans = db.prepare('DELETE FROM usage_events WHERE task_id NOT IN (SELECT id FROM tasks)').run()
