@@ -119,7 +119,13 @@ export function listTaskTurns(db: Database.Database, taskId: string): TurnRow[] 
           AND e.ts < COALESCE(t.ended_at, 9223372036854775807)
         WHERE t.task_id = ?
         GROUP BY t.id
-        ORDER BY t.started_at DESC
+        ORDER BY EXISTS (
+                   SELECT 1 FROM usage_events e2
+                    WHERE e2.task_id = t.task_id
+                      AND e2.ts >= t.started_at
+                      AND e2.ts < COALESCE(t.ended_at, 9223372036854775807)
+                 ) DESC,
+                 t.started_at DESC
         LIMIT 200`
     )
     .all(taskId) as Array<{

@@ -60,12 +60,20 @@ export class BatchWriter {
     const close = db.prepare(
       'UPDATE task_turns SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL'
     )
-    const open = db.prepare('INSERT INTO task_turns (task_id, started_at) VALUES (?, ?)')
+    const open = db.prepare(
+      // 3 秒内的连续 turnStart（重试 / 分步提交）算同一次输入：
+      // 否则会切出一个几十毫秒的空窗口，那一轮没有用量却出现在轮次历史里
+      `INSERT INTO task_turns (task_id, started_at)
+       SELECT ?, ?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM task_turns WHERE task_id = ? AND started_at > ? - 3000
+        )`
+    )
     db.transaction(() => {
       for (const op of this.turnOps) {
         if (op.kind === 'start') {
           close.run(op.ts, op.taskId)
-          open.run(op.taskId, op.ts)
+          open.run(op.taskId, op.ts, op.taskId, op.ts)
         } else {
           close.run(op.ts, op.taskId)
         }

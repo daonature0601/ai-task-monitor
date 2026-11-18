@@ -166,10 +166,18 @@ export function attachTurnStats(db: Database.Database, rows: TaskSnapshot[]): Ta
   // 与轮次表对齐：列表、卡片、详情都取「最新一轮」这一行，
   // 不能一个用 turn_started_at、一个用 task_turns 首行 —— 源日志滞后时会分成两轮。
   const latestTurn = db.prepare(
+    // 同一秒内可能有两条轮次（重试产生），优先取真正有用量的那条，
+    // 否则列表会挑到那个 0 事件的空窗口，显示成 0 in / 0 out。
     `SELECT started_at, ended_at
-       FROM task_turns
-      WHERE task_id = ?
-      ORDER BY started_at DESC
+       FROM task_turns tt
+      WHERE tt.task_id = ?
+      ORDER BY EXISTS (
+                 SELECT 1 FROM usage_events e
+                  WHERE e.task_id = tt.task_id
+                    AND e.ts >= tt.started_at
+                    AND e.ts < COALESCE(tt.ended_at, 9223372036854775807)
+               ) DESC,
+               tt.started_at DESC
       LIMIT 1`
   )
   const latestUsage = db.prepare(

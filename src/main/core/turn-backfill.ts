@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 25
+export const TURNS_VERSION = 26
 
 interface Span {
   tool: string
@@ -146,12 +146,19 @@ async function codebuddyIdeSpans(): Promise<Span[]> {
       points.push(ts)
     }
     points.sort((a, b) => a - b)
-    for (let index = 0; index < points.length; index += 1) {
+    // 同一秒内的连续请求（重试 / 分步提交）属于同一次用户输入：
+    // 不合并会切成一个几十毫秒的空窗口，那一轮既没有事件也没有用量。
+    const merged: number[] = []
+    for (const ts of points) {
+      if (merged.length > 0 && ts - merged[merged.length - 1] < 3_000) continue
+      merged.push(ts)
+    }
+    for (let index = 0; index < merged.length; index += 1) {
       spans.push({
         tool: 'codebuddy',
         sessionId: conversation.conversationId,
-        start: points[index],
-        end: points[index + 1] ?? conversation.mtimeMs
+        start: merged[index],
+        end: merged[index + 1] ?? conversation.mtimeMs
       })
     }
     continue
