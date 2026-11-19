@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 26
+export const TURNS_VERSION = 29
 
 interface Span {
   tool: string
@@ -96,7 +96,13 @@ function str(value: unknown): string {
 
 /** 一串时间点 → 相邻起点构成的轮次；最后一条用 fallbackEnd 收口 */
 function fromStarts(starts: number[], fallbackEnd: number | null, tool: string, sessionId: string): Span[] {
-  const points = starts.filter((ts) => ts > 0).sort((a, b) => a - b)
+  const sorted = starts.filter((ts) => ts > 0).sort((a, b) => a - b)
+  // 3 秒内的连续输入算同一次（重发 / 回车抖动），否则会切出没有用量的空轮
+  const points: number[] = []
+  for (const ts of sorted) {
+    if (points.length > 0 && ts - points[points.length - 1] < 3_000) continue
+    points.push(ts)
+  }
   return points.map((start, index) => ({
     tool,
     sessionId,
@@ -181,18 +187,38 @@ async function workbuddySpans(sessionIds: Set<string>): Promise<Span[]> {
     matched += 1
     const lines = await readJsonl(file)
     const starts: number[] = []
+    const activity: number[] = []
     let last = 0
     for (const line of lines) {
       if (str(line.type) !== 'message') continue
       const ts = tsOf(line.timestamp)
       if (!ts) continue
       last = Math.max(last, ts)
+      activity.push(ts)
       if (str(line.role) === 'user') {
         starts.push(ts)
         users += 1
       }
     }
-    spans.push(...fromStarts(starts, last || null, 'workbuddy', stem))
+
+    // 结束时间取「本轮窗口内最后一条消息」：同一会话可能隔天再聊，
+    // 直接用下一条用户输入的起点会把上一轮算成好几天。
+    const merged = fromStarts(starts, last || null, 'workbuddy', stem)
+    for (let index = 0; index < merged.length; index += 1) {
+      const span = merged[index]
+      const nextStart = merged[index + 1]?.start ?? Number.POSITIVE_INFINITY
+      // 相邻输入间隔在 1 小时内：说明这一轮一直在工作，取下一条输入作为结束
+      // （与软件显示一致）；跨天的长间隔说明中间没动，收口到本轮最后一条消息
+      if (nextStart - span.start <= 3_600_000) {
+        spans.push(span)
+        continue
+      }
+      let end = span.start
+      for (const ts of activity) {
+        if (ts >= span.start && ts < nextStart && ts > end) end = ts
+      }
+      spans.push({ ...span, end: end > span.start ? end : (span.end ?? null) })
+    }
   }
   console.log(`[turns] workbuddy files=${files.length} matched=${matched} users=${users}`)
   return spans
