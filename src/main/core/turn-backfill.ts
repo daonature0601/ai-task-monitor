@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 32
+export const TURNS_VERSION = 35
 
 interface Span {
   tool: string
@@ -303,6 +303,17 @@ async function codexSpans(sessionIds: Set<string>): Promise<Span[]> {
       if (merged.length > 0 && ts - merged[merged.length - 1] < 3_000) continue
       merged.push(ts)
     }
+    if (bucket.userStarts.length > 0) {
+      const extra = merged.filter(
+        (ts) => !bucket.userStarts.some((u) => Math.abs(u - ts) < 1000)
+      )
+      if (extra.length > 0) {
+        console.log(
+          `[turns] codex ${sessionId.slice(0, 8)} user=${bucket.userStarts.length} task=${bucket.taskStarts.length} extra=`,
+          extra.map((ts) => new Date(ts).toTimeString().slice(0, 8))
+        )
+      }
+    }
     const ends = [...bucket.ends].sort((a, b) => a - b)
     for (let index = 0; index < merged.length; index += 1) {
       const start = merged[index]
@@ -449,6 +460,18 @@ export async function rebuildTaskTurns(db: Database.Database): Promise<{ spans: 
       rows += 1
     }
   })()
+
+  // 重建后把任务上的「本轮」也对齐到轮次表的最新一条：
+  // 否则任务行里残留的旧起点（来自已废弃的 task_started 信号）会在启动时
+  // 被「补当前轮」再插一行，凭空多出一轮。
+  db.exec(`
+UPDATE tasks
+   SET turn_started_at = (SELECT MAX(tt.started_at) FROM task_turns tt WHERE tt.task_id = tasks.id),
+       turn_ended_at   = (SELECT tt.ended_at FROM task_turns tt
+                           WHERE tt.task_id = tasks.id
+                           ORDER BY tt.started_at DESC LIMIT 1)
+ WHERE EXISTS (SELECT 1 FROM task_turns tt WHERE tt.task_id = tasks.id)
+`)
 
   return { spans: spans.length, rows }
 }

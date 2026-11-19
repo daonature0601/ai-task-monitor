@@ -187,10 +187,16 @@ export function createRuntime(
                  WHERE e.task_id = t.id AND e.ts >= t.turn_started_at
               )
           AND t.turn_started_at > COALESCE(
-            (SELECT MAX(tt.started_at) FROM task_turns tt WHERE tt.task_id = t.id), 0)`
+            (SELECT MAX(tt.started_at) FROM task_turns tt WHERE tt.task_id = t.id), 0)
+          -- 还要求晚于上一轮的结束：续写分段的旧起点落在上一轮区间内，
+          -- 不满足就会凭空补出一轮（Codex 的 22:28 就是这么来的）
+          AND t.turn_started_at > COALESCE(
+            (SELECT MAX(tt.ended_at) FROM task_turns tt WHERE tt.task_id = t.id), 0)`
     )
     .run()
-  if (repaired.changes > 0) console.log(`[turns] restored ${repaired.changes} current turns`)
+  if (repaired.changes > 0) {
+    console.log(`[turns] restored ${repaired.changes} current turns (from tasks.turn_started_at)`)
+  }
 
   // 事件级费用回填：必须在 hydrate 之前完成 —— 否则内存里装载的是旧的任务费用，
   // 下一次落盘又会把它写回去，重算等于没做。
