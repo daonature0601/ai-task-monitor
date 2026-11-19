@@ -180,6 +180,12 @@ export function createRuntime(
        SELECT t.id, t.turn_started_at, t.turn_ended_at
          FROM tasks t
         WHERE t.turn_started_at IS NOT NULL
+          -- 只有该时刻之后确实有用量事件，才说明这是一轮真实发生的对话；
+          -- 续写分段的「开始」信号没有事件，补进来会多出一轮
+          AND EXISTS (
+                SELECT 1 FROM usage_events e
+                 WHERE e.task_id = t.id AND e.ts >= t.turn_started_at
+              )
           AND t.turn_started_at > COALESCE(
             (SELECT MAX(tt.started_at) FROM task_turns tt WHERE tt.task_id = t.id), 0)`
     )

@@ -311,7 +311,9 @@ export class CodexAdapter extends BaseAdapter {
           model: session.model,
           tokensSource: 'unavailable',
           skipEventLog: true,
-          turnStart: kind === 'task_started',
+          // 轮次起点只认用户消息（重建时统一处理）：task_started 在续写/恢复的分段里
+          // 也会发，用它开新轮会比软件里多出一轮
+          turnStart: false,
           turnEnd: kind === 'task_complete',
           // 回合结束即任务结束：Codex 桌面端显示"对话执行完成"时，
           // 这一轮就是终点，不应再挂 30 分钟「静默」

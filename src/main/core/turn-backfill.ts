@@ -19,7 +19,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 29
+export const TURNS_VERSION = 32
 
 interface Span {
   tool: string
@@ -257,19 +257,21 @@ async function dshSpans(): Promise<Span[]> {
 async function codexSpans(sessionIds: Set<string>): Promise<Span[]> {
   const root = join(homePath('.codex'), 'sessions')
   const files = (await walkFiles(root, 5)).filter((file) => file.endsWith('.jsonl'))
-  const spans: Span[] = []
+
+  // 同一会话可能被切成多个 rollout 文件（压缩后续写 / 恢复）。
+  // 必须按会话合并后再判轮次：否则某个分段里「只有 task_started、没有用户消息」，
+  // 会被当成新的一轮，比软件里显示的多一轮。
+  const bySession = new Map<string, { userStarts: number[]; taskStarts: number[]; ends: number[] }>()
+
   for (const file of files) {
     const match = /rollout-.*-([0-9a-f-]{36})\.jsonl$/.exec(basename(file))
     if (!match) continue
     const sessionId = match[1]
     if (!sessionIds.has(sessionId)) continue
     const lines = await readJsonl(file)
+    const bucket = bySession.get(sessionId) ?? { userStarts: [], taskStarts: [], ends: [] }
+    bySession.set(sessionId, bucket)
 
-    // Codex 的 task_started 只在「新任务开始」时发；用户在一轮进行中插话会复用同一个任务，
-    // 所以轮次起点要同时看 task_started 与用户消息，两者落在同一时刻时合并。
-    const taskStarts: number[] = []
-    const userStarts: number[] = []
-    const ends: number[] = []
     for (const line of lines) {
       const payload = line.payload
       if (!payload || typeof payload !== 'object') continue
@@ -277,7 +279,7 @@ async function codexSpans(sessionIds: Set<string>): Promise<Span[]> {
       const kind = str(record.type)
       if (str(line.type) === 'event_msg' && (kind === 'task_started' || kind === 'task_complete')) {
         const ts = tsOf(line.timestamp)
-        if (ts) (kind === 'task_started' ? taskStarts : ends).push(ts)
+        if (ts) (kind === 'task_started' ? bucket.taskStarts : bucket.ends).push(ts)
         continue
       }
       if (str(line.type) !== 'response_item' || kind !== 'message') continue
@@ -286,42 +288,29 @@ async function codexSpans(sessionIds: Set<string>): Promise<Span[]> {
       const text = blocks
         .map((block) => (block && typeof block === 'object' ? str((block as Record<string, unknown>).text) : ''))
         .join('')
-      // 环境注入与用户指令是系统写的，不算用户输入
       if (!text || text.includes('environment_context') || text.includes('<user_instructions>')) continue
       const ts = tsOf(line.timestamp)
-      if (ts) userStarts.push(ts)
+      if (ts) bucket.userStarts.push(ts)
     }
+  }
 
-    // 用户消息是轮次的权威起点；task_started 若在两分钟内已有用户消息，
-    // 说明是同一次输入触发的（Codex 偶尔先建任务再落用户消息），不重复计数。
-    const starts = [
-      ...userStarts,
-      ...taskStarts.filter((ts) => !userStarts.some((u) => Math.abs(u - ts) <= 120_000))
-    ]
-
+  const spans: Span[] = []
+  for (const [sessionId, bucket] of bySession) {
+    // 用户消息是权威起点；只有整个会话都没有用户消息时才退回 task_started
+    const starts = bucket.userStarts.length > 0 ? bucket.userStarts : bucket.taskStarts
     const merged: number[] = []
     for (const ts of [...starts].sort((a, b) => a - b)) {
-      const last = merged[merged.length - 1]
-      if (last !== undefined && ts - last <= 10_000) continue
+      if (merged.length > 0 && ts - merged[merged.length - 1] < 3_000) continue
       merged.push(ts)
     }
-
-    let open: number | null = null
-    const events: Array<{ ts: number; kind: 'start' | 'end' }> = [
-      ...merged.map((ts) => ({ ts, kind: 'start' as const })),
-      ...ends.map((ts) => ({ ts, kind: 'end' as const }))
-    ].sort((a, b) => a.ts - b.ts)
-
-    for (const event of events) {
-      if (event.kind === 'start') {
-        if (open !== null) spans.push({ tool: 'codex', sessionId, start: open, end: event.ts })
-        open = event.ts
-      } else if (open !== null) {
-        spans.push({ tool: 'codex', sessionId, start: open, end: event.ts })
-        open = null
-      }
+    const ends = [...bucket.ends].sort((a, b) => a - b)
+    for (let index = 0; index < merged.length; index += 1) {
+      const start = merged[index]
+      const nextStart = merged[index + 1]
+      // 这一轮的 task_complete 落在 [start, nextStart) 就用它收口，否则用下一条起点
+      const complete = ends.find((ts) => ts >= start && (nextStart === undefined || ts < nextStart))
+      spans.push({ tool: 'codex', sessionId, start, end: complete ?? nextStart ?? null })
     }
-    if (open !== null) spans.push({ tool: 'codex', sessionId, start: open, end: null })
   }
   return spans
 }
