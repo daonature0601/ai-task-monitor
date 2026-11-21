@@ -315,6 +315,8 @@ export class CodexAdapter extends BaseAdapter {
           // 也会发，用它开新轮会比软件里多出一轮
           turnStart: false,
           turnEnd: kind === 'task_complete',
+          // 新会话的首个 task_started 必须立刻建任务，否则实时任务里看不到
+          allowCreate: kind === 'task_started',
           // 回合结束即任务结束：Codex 桌面端显示"对话执行完成"时，
           // 这一轮就是终点，不应再挂 30 分钟「静默」
           endSignal: kind === 'task_complete',

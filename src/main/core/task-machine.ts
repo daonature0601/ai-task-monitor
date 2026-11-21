@@ -146,7 +146,7 @@ export class TaskMachine {
       positive(delta.cacheWriteTokens)
     const signalOnly =
       Boolean(delta.skipEventLog) && usageTotal === 0 && !delta.turnStart && !delta.turnEnd
-    if (!task && signalOnly) {
+    if (!task && signalOnly && !delta.allowCreate) {
       return { applied: false, taskId }
     }
 

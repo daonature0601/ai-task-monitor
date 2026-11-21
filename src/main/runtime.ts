@@ -293,6 +293,14 @@ export function createRuntime(
       now,
       summary
     })
+
+    // 概览卡片用的也是「本轮」口径，必须与列表 / 抽屉同源：
+    // 内存里的计数在重启或重扫后会与库不一致，这里统一用事件聚合覆盖。
+    try {
+      attachTurnStats(db, snapshot.tasks)
+    } catch (error) {
+      console.error('[runtime] attach turn stats failed', error)
+    }
     const previous = lastSnapshot
     lastSnapshot = snapshot
     if (!force && previous && snapshot.generatedAt - previous.generatedAt < 500) return

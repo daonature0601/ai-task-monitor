@@ -162,24 +162,6 @@ export class CodeBuddyAdapter extends BaseAdapter {
 
     if (conversations.length === 0) return
 
-    // 模型与用量索引不是同一份文件，也不一定存在会话目录：
-    // 直接按「会话 → 模型」映射推送，覆盖没有独立目录的会话。
-    for (const [convId, model] of this.ideModels) {
-      const key = `${convId}:${model}`
-      if (this.ideModelPushed.has(key)) continue
-      this.ideModelPushed.add(key)
-      this.push({
-        tool: this.id,
-        externalSessionId: convId,
-        ts: Date.now(),
-        model,
-        tokensSource: 'unavailable',
-        skipEventLog: true,
-        dedupeKey: `cbide:model:${key}`,
-        ...emptyUsage()
-      })
-    }
-
     const titlesByWs = new Map<string, Map<string, string>>()
     const modelsByWs = new Map<string, Map<string, string>>()
 
@@ -228,7 +210,31 @@ export class CodeBuddyAdapter extends BaseAdapter {
       this.ideMtime.set(conversation.filePath, conversation.mtimeMs)
 
       const requests = await readCbIdeRequests(conversation)
-      if (requests.length === 0) continue
+      if (requests.length === 0) {
+        // 刚开的会话：index.json 要等一轮结束才写入 requests，
+        // 这里用目录的 mtime 作为「有人正在用」的信号先建任务，
+        // 否则用户在首轮回复完成前看不到任何实时任务。
+        const fresh = Date.now() - conversation.mtimeMs < 10 * 60_000
+        const key = `cbide:new:${conversation.conversationId}`
+        if (fresh && !this.ideModelPushed.has(key)) {
+          this.ideModelPushed.add(key)
+          this.push({
+            tool: this.id,
+            externalSessionId: conversation.conversationId,
+            ts: conversation.mtimeMs,
+            title: titles.get(conversation.conversationId),
+            project: this.ideProjects.get(conversation.conversationId),
+            model: this.ideModels.get(conversation.conversationId),
+            authoritativeTitle: Boolean(titles.get(conversation.conversationId)),
+            tokensSource: 'unavailable',
+            skipEventLog: true,
+            allowCreate: true,
+            dedupeKey: key,
+            ...emptyUsage()
+          })
+        }
+        continue
+      }
 
       // 最后一条请求没有后续请求可参照，用文件 mtime 作为这一轮的结束
       const last = requests[requests.length - 1]
