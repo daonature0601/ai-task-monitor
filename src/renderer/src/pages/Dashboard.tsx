@@ -64,7 +64,9 @@ export function Dashboard(): JSX.Element {
   // 今日指标以数据库为准（按用量事件时间归集），与统计页完全同源
   const today = todayStats?.totals
   const dailyTotals = (stats?.daily ?? []).map((point) => point.total)
-  const totalTokens = (today?.todayInputTokens ?? 0) + (today?.todayOutputTokens ?? 0)
+  // 全量输入 = 缓存未命中 + 缓存命中，与任务列表 / 抽屉口径一致
+  const todayInputFull = (summary?.todayInputTokens ?? 0) + (summary?.todayCacheReadTokens ?? 0)
+  const totalTokens = todayInputFull + (summary?.todayOutputTokens ?? 0)
 
   return (
     <div className="space-y-6">
@@ -86,7 +88,7 @@ export function Dashboard(): JSX.Element {
         <Metric
           label="今日 Token"
           value={formatTokens(totalTokens)}
-          hint={`输入 ${formatTokens(summary?.todayInputTokens ?? 0)} · 输出 ${formatTokens(summary?.todayOutputTokens ?? 0)}`}
+          hint={`输入 ${formatTokens(todayInputFull)}（含缓存） · 输出 ${formatTokens(summary?.todayOutputTokens ?? 0)}`}
           spark={dailyTotals}
           sparkColor="#22D3EE"
         />

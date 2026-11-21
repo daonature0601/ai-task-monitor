@@ -15,7 +15,7 @@ import {
 } from 'recharts'
 import type { CachePoint, Currency, DailyPoint, ToolAggregate, ToolId } from '@shared/types'
 import { TOOL_META } from '@shared/types'
-import { formatCost, formatRate, formatTokens } from '@shared/format'
+import { displayInput, formatCost, formatRate, formatTokens } from '@shared/format'
 import { cn, toolName } from '../../lib/utils'
 
 interface TooltipItem {
@@ -323,7 +323,7 @@ export function TokenBars({
   const rows = data
     .map((item) => ({
       tool: toolName(item.tool),
-      input: item.inputTokens,
+      input: displayInput(item.inputTokens, item.cacheReadTokens ?? 0),
       output: item.outputTokens,
       cost: formatCost(item.costUsd, currency, fxRate)
     }))

@@ -328,7 +328,7 @@ export function TaskDetailDrawer(): JSX.Element | null {
                         {formatEventTime(event.ts)}
                       </span>
                       <span className="num text-caption text-fg-mid">
-                        in {formatTokens(event.inputTokens)} · out {formatTokens(event.outputTokens)} · cache{' '}
+                        in {formatTokens(displayInput(event.inputTokens, event.cacheReadTokens))} · out {formatTokens(event.outputTokens)} · cache{' '}
                         {formatTokens(event.cacheReadTokens)}
                       </span>
                       <span className="num text-caption text-fg-hi">

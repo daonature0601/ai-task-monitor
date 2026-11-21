@@ -51,6 +51,8 @@ export interface TokenUsage {
 
 /** 适配器产出的归一化增量。token 字段必须为真实值或 0，禁止估算填充。 */
 export interface UsageDelta extends TokenUsage {
+  /** 允许仅凭这条信号创建任务（心跳 / 标题默认不行，Codex 的 task_started 可以） */
+  allowCreate?: boolean
   tool: ToolId
   externalSessionId: string
   ts: number
@@ -216,6 +218,12 @@ export interface StateSignal {
   /** 会话所属项目名 */
   project?: string
   model?: string
+  /**
+   * 允许仅凭这条信号创建任务。
+   * 心跳 / 标题这类元信息默认不允许建任务（会产生幽灵卡片），
+   * 但 Codex 的 task_started 是真实的回合边界，需要立即建任务。
+   */
+  allowCreate?: boolean
   /** 同一会话的多次活动始终归入同一任务（IDE 类数据源：一次对话就是一个任务） */
   keepSession?: boolean
   /** 会话真实开始时间，hook / 心跳可提供 */
@@ -310,9 +318,13 @@ export interface ToolAggregate {
   tool: ToolId
   tasks: number
   costUsd: number
+  /** 缓存未命中的新输入 */
   inputTokens: number
   outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
   cacheHitRate: number | null
+  totalTokens: number
 }
 
 export interface DailyPoint {

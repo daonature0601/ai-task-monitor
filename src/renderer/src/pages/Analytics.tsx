@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Download } from 'lucide-react'
 import type { StatsPayload } from '@shared/types'
-import { formatCost, formatDuration, formatRate, formatTokens, turnElapsed } from '@shared/format'
+import {
+  displayInput,
+  formatCost,
+  formatDuration,
+  formatRate,
+  formatTokens,
+  turnElapsed
+} from '@shared/format'
 import { useMonitor } from '../store/monitor'
 import { Card, Metric, SectionTitle, ToolAvatar } from '../components/ui/atoms'
 import { CacheEfficiency, ChartTooltip, CostTrend, useChartReady } from '../components/charts'
@@ -162,8 +169,12 @@ export function Analytics(): JSX.Element {
         <Metric label="区间费用" value={formatCost(totals?.todayCostUsd ?? 0, currency, fxRate)} />
         <Metric
           label="区间 Token"
-          value={formatTokens((totals?.todayInputTokens ?? 0) + (totals?.todayOutputTokens ?? 0))}
-          hint={`输入 ${formatTokens(totals?.todayInputTokens ?? 0)} · 输出 ${formatTokens(totals?.todayOutputTokens ?? 0)}`}
+          value={formatTokens(
+            (totals?.todayInputTokens ?? 0) +
+              (totals?.todayCacheReadTokens ?? 0) +
+              (totals?.todayOutputTokens ?? 0)
+          )}
+          hint={`输入 ${formatTokens((totals?.todayInputTokens ?? 0) + (totals?.todayCacheReadTokens ?? 0))}（含缓存） · 输出 ${formatTokens(totals?.todayOutputTokens ?? 0)}`}
         />
         <Metric label="平均缓存命中" value={formatRate(totals?.avgCacheHitRate)} />
       </div>
@@ -280,7 +291,7 @@ export function Analytics(): JSX.Element {
                     </td>
                     <td className="num px-2.5 py-1.5 text-right text-fg-mid">{row.tasks}</td>
                     <td className="num px-2.5 py-1.5 text-right text-fg-mid">
-                      {formatTokens(row.inputTokens)}
+                      {formatTokens(displayInput(row.inputTokens, row.cacheReadTokens ?? 0))}
                     </td>
                     <td className="num px-2.5 py-1.5 text-right text-fg-mid">
                       {formatRate(row.cacheHitRate)}
