@@ -66,6 +66,10 @@ export function recomputeEventCosts(
         cacheWriteTokens: row.cache_write_tokens,
         reasoningTokens: row.reasoning_tokens
       }
+      // 没有单价时**不覆盖**已有费用：
+      // 事件当初是按「当时生效的模型」计价的，任务合并后统一用最后一个模型名重算，
+      // 会把历史上真实算出的金额清零（如 gpt-6-astra 时期的消费遇到 gpt-6.2-sol 无价）。
+      if (!price) continue
       const value = computeCost(usage, price, row.ts)
       if (Math.abs(value - row.cost_usd) > 1e-9) {
         update.run(value, row.id)
