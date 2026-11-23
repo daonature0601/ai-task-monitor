@@ -84,6 +84,8 @@ export const PRICING_SEED: PricingRow[] = [
   // ── OpenAI（官方 API Pricing 页，Standard 档）────────────────
   { id: 'openai-gpt-5.3-codex', provider: 'OpenAI', match: 'gpt-5.3-codex*', inputPerM: 1.75, outputPerM: 14, cacheReadPerM: 0.175, cacheWritePerM: 0, status: 'verified', source: OPENAI_SRC, note: 'Codex 专用档：$1.75/$14/$0.175；Priority 档 $3.5/$28' },
   { id: 'openai-gpt-6-astra', provider: 'OpenAI', match: 'gpt-6-astra*', inputPerM: 10, outputPerM: 50, cacheReadPerM: 1, cacheWritePerM: 12.5, status: 'verified', source: OPENAI_SRC, note: '缓存写入为 30m 档；12h 档 $25，长上下文翻倍' },
+  { id: 'openai-gpt-6.2-sol', provider: 'OpenAI', match: 'gpt-6.2-sol*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.1, cacheWritePerM: 2.5, status: 'verified', source: OPENAI_SRC, note: 'GPT-6.2 Sol 标准价（缓存写 30m $2.5 / 12h $5）' },
+  { id: 'openai-gpt-6.2-astra', provider: 'OpenAI', match: 'gpt-6.2-astra*', inputPerM: 8, outputPerM: 40, cacheReadPerM: 0.4, cacheWritePerM: 10, status: 'verified', source: OPENAI_SRC, note: 'GPT-6.2 Astra 标准价（缓存写 30m $10 / 12h $20）' },
   { id: 'openai-gpt-6.1-sol', provider: 'OpenAI', match: 'gpt-6.1-sol*', inputPerM: 2, outputPerM: 10, cacheReadPerM: 0.1, cacheWritePerM: 2.5, status: 'verified', source: OPENAI_SRC },
   { id: 'openai-gpt-6.1-terra', provider: 'OpenAI', match: 'gpt-6.1-terra*', inputPerM: 1, outputPerM: 5, cacheReadPerM: 0.05, cacheWritePerM: 1.25, status: 'verified', source: OPENAI_SRC },
   { id: 'openai-gpt-6-luna', provider: 'OpenAI', match: 'gpt-6-luna*', inputPerM: 0.1, outputPerM: 0.5, cacheReadPerM: 0.01, cacheWritePerM: 0.125, status: 'verified', source: OPENAI_SRC },
