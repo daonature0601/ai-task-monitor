@@ -208,6 +208,18 @@ DELETE FROM task_turns
 CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_unique ON task_turns(task_id, started_at);
 `)
     }
+  },
+  {
+    /**
+     * v10：事件级模型。
+     * 计费必须按「事件写入时生效的模型」，否则任务合并 / 中途切模型后
+     * 会用最后一个模型重算全部历史，把真实金额算错甚至清零。
+     */
+    version: 10,
+    name: 'usage-event-model',
+    up: (db) => {
+      db.exec(`ALTER TABLE usage_events ADD COLUMN model TEXT;`)
+    }
   }
 ]
 

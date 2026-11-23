@@ -25,6 +25,7 @@ export function recomputeEventCosts(
               e.cache_write_tokens AS cache_write_tokens,
               e.reasoning_tokens AS reasoning_tokens,
               e.cost_usd AS cost_usd,
+              e.model AS event_model,
               t.model AS model,
               t.tokens_source AS tokens_source
        FROM usage_events e JOIN tasks t ON t.id = e.task_id`
@@ -38,6 +39,7 @@ export function recomputeEventCosts(
     cache_write_tokens: number
     reasoning_tokens: number
     cost_usd: number
+    event_model: string | null
     model: string | null
     tokens_source: string
   }>
@@ -58,7 +60,7 @@ export function recomputeEventCosts(
   const run = db.transaction(() => {
     for (const row of rows) {
       const billable = row.tokens_source === 'native' || row.tokens_source === 'bridge'
-      const price = billable ? priceFor(row.model) : null
+      const price = billable ? priceFor(row.event_model ?? row.model) : null
       const usage: TokenUsage = {
         inputTokens: row.input_tokens,
         outputTokens: row.output_tokens,

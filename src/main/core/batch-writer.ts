@@ -50,7 +50,8 @@ export class BatchWriter {
       reasoningTokens: delta.reasoningTokens,
       // 分时计价：用事件自身时间判定高峰 / 非高峰
       costUsd: billable ? computeCost(delta, price.row, delta.ts) : 0,
-      dedupeKey: delta.dedupeKey
+      dedupeKey: delta.dedupeKey,
+      model: delta.model
     })
   }
 

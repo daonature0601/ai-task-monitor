@@ -11,13 +11,15 @@ export interface UsageEventRow {
   reasoningTokens: number
   costUsd: number
   dedupeKey: string
+  /** 这条事件写入时实际使用的模型，用于按各自单价计价 */
+  model?: string
 }
 
 const INSERT_SQL = `
 INSERT OR IGNORE INTO usage_events
-  (task_id, ts, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_usd, dedupe_key)
+  (task_id, ts, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_usd, dedupe_key, model)
 VALUES
-  (@taskId, @ts, @inputTokens, @outputTokens, @cacheReadTokens, @cacheWriteTokens, @reasoningTokens, @costUsd, @dedupeKey)
+  (@taskId, @ts, @inputTokens, @outputTokens, @cacheReadTokens, @cacheWriteTokens, @reasoningTokens, @costUsd, @dedupeKey, @model)
 `
 
 /** 批量幂等写入，返回实际插入条数（重复 dedupeKey 被忽略） */
