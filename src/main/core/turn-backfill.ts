@@ -1,4 +1,6 @@
 import { promises as fsp } from 'node:fs'
+import { createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
 import { basename, dirname, join } from 'node:path'
 import type Database from 'better-sqlite3'
 import { appSupportDir, homePath } from '../collectors/paths'
@@ -19,7 +21,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 38
+export const TURNS_VERSION = 40
 
 interface Span {
   tool: string
@@ -54,24 +56,34 @@ async function walkFiles(root: string, depth: number): Promise<string[]> {
 }
 
 async function readJsonl(path: string): Promise<Array<Record<string, unknown>>> {
-  let raw: string
-  try {
-    const stat = await fsp.stat(path)
-    if (stat.size > 128 * 1024 * 1024) return []
-    raw = await fsp.readFile(path, 'utf8')
-  } catch {
-    return []
-  }
   const out: Array<Record<string, unknown>> = []
-  for (const line of raw.split('\n')) {
-    const text = line.trim()
-    if (!text) continue
+  const push = (text: string): void => {
+    const trimmed = text.trim()
+    if (!trimmed) return
     try {
-      const parsed = JSON.parse(text) as unknown
+      const parsed = JSON.parse(trimmed) as unknown
       if (parsed && typeof parsed === 'object') out.push(parsed as Record<string, unknown>)
     } catch {
-      // 半行或坏行跳过
+      // 半行 / 坏行跳过
     }
+  }
+
+  try {
+    const stat = await fsp.stat(path)
+    // 超大日志（Codex 长会话可达 400MB+）必须流式读取：
+    // 整份读入会 OOM，直接跳过又会丢掉整段轮次（只剩兜底 1 轮）
+    if (stat.size > 32 * 1024 * 1024) {
+      const rl = createInterface({
+        input: createReadStream(path, { encoding: 'utf8' }),
+        crlfDelay: Infinity
+      })
+      for await (const line of rl) push(line)
+      return out
+    }
+    const raw = await fsp.readFile(path, 'utf8')
+    for (const line of raw.split('\n')) push(line)
+  } catch {
+    return out
   }
   return out
 }
