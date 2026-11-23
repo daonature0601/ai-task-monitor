@@ -309,6 +309,8 @@ export class CodexAdapter extends BaseAdapter {
           project: this.projectFor(session),
           authoritativeTitle: true,
           model: session.model,
+          // 一次会话一个任务：与 CodeBuddy / WorkBuddy 一致，轮次由 task_turns 表达
+          keepSession: true,
           tokensSource: 'unavailable',
           skipEventLog: true,
           // 轮次起点只认用户消息（重建时统一处理）：task_started 在续写/恢复的分段里
@@ -410,6 +412,8 @@ export class CodexAdapter extends BaseAdapter {
       authoritativeTitle: true,
       model: metaInfo.model,
       tokensSource: 'native',
+      // 一次会话一个任务：历史回填不再切 ~h 分身
+      keepSession: true,
       dedupeKey: `meta:${meta.relPath}`,
       ...emptyUsage()
     })
@@ -498,6 +502,8 @@ export class CodexAdapter extends BaseAdapter {
       cacheWriteTokens: cacheWrite,
       reasoningTokens: reasoning,
       tokensSource: 'native',
+      // 一次会话一个任务：历史回填不再切 ~h 分身
+      keepSession: true,
       dedupeKey: `tok:${meta.relPath}:${meta.offset}`
     })
   }
