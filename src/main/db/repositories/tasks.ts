@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
-import type { TaskQuery, TaskSnapshot, ToolId } from '@shared/types'
-import { computeCacheHitRate } from '@shared/format'
+import type { TaskQuery, TaskSnapshot, TaskSortKey, ToolId } from '@shared/types'
+import { computeCacheHitRate, displayInput, turnElapsed } from '@shared/format'
 import type { AlertKind } from '@shared/types'
 
 export interface TaskRow {
@@ -281,22 +281,15 @@ export function queryTasks(
   }
 
   const whereSql = where.join(' AND ')
-  const total = (
-    db.prepare(`SELECT COUNT(*) AS c FROM tasks WHERE ${whereSql}`).get(params) as { c: number }
-  ).c
 
+  // 排序按「界面上展示的值」做（本轮用量来自事件聚合，SQL 里排不准），
+  // 因此先取出全部命中行，聚合后再排序、再分页。
+  const all = db.prepare(`SELECT * FROM tasks WHERE ${whereSql}`).all(params) as TaskRow[]
+  const rows = attachTurnStats(db, all.map(rowToSnapshot))
+  sortTasks(rows, query.sortBy ?? 'start', query.sortDir ?? 'desc')
   const limit = Math.min(Math.max(query.limit ?? 100, 1), 1000)
   const offset = Math.max(query.offset ?? 0, 0)
-  const rows = db
-    .prepare(
-      `SELECT * FROM tasks WHERE ${whereSql}
-       ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
-                COALESCE(turn_started_at, started_at) DESC
-       LIMIT @limit OFFSET @offset`
-    )
-    .all({ ...params, limit, offset }) as TaskRow[]
-
-  return { rows: attachTurnStats(db, rows.map(rowToSnapshot)), total }
+  return { rows: rows.slice(offset, offset + limit), total: rows.length }
 }
 
 export function markStaleTasksEnded(db: Database.Database, now = Date.now()): number {
@@ -325,4 +318,49 @@ export function countTasks(db: Database.Database): number {
 export function distinctTools(db: Database.Database): ToolId[] {
   const rows = db.prepare('SELECT DISTINCT tool FROM tasks').all() as Array<{ tool: string }>
   return rows.map((r) => r.tool as ToolId)
+}
+
+
+/** 列表排序：按界面上看到的数值排，保证「点哪列就按哪列」 */
+function sortTasks(rows: TaskSnapshot[], key: TaskSortKey, dir: 'asc' | 'desc'): void {
+  const sign = dir === 'asc' ? 1 : -1
+  const statusRank: Record<TaskSnapshot['status'], number> = { running: 0, idle: 1, ended: 2 }
+  const valueOf = (task: TaskSnapshot): number | string => {
+    switch (key) {
+      case 'title':
+        return (task.title || '').toLowerCase()
+      case 'tool':
+        return task.tool
+      case 'start':
+        return task.turnStartedAt ?? task.startedAt
+      case 'duration':
+        return turnElapsed(task)
+      case 'input':
+        return displayInput(task.turnInputTokens, task.turnCacheReadTokens)
+      case 'output':
+        return task.turnOutputTokens
+      case 'cache':
+        return computeCacheHitRate({
+          inputTokens: task.turnInputTokens,
+          cacheReadTokens: task.turnCacheReadTokens,
+          cacheWriteTokens: task.turnCacheWriteTokens
+        }) ?? -1
+      case 'cost':
+        return task.turnCostUsd
+      case 'status':
+        return statusRank[task.status]
+      default:
+        return task.turnStartedAt ?? task.startedAt
+    }
+  }
+
+  rows.sort((a, b) => {
+    const va = valueOf(a)
+    const vb = valueOf(b)
+    if (typeof va === 'string' || typeof vb === 'string') {
+      return String(va).localeCompare(String(vb), 'zh-Hans-CN') * sign
+    }
+    if (va === vb) return 0
+    return (va < vb ? -1 : 1) * sign
+  })
 }

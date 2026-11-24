@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, Search } from 'lucide-react'
-import type { TaskQuery, ToolId } from '@shared/types'
+import type { TaskQuery, TaskSortKey, ToolId } from '@shared/types'
 import { TOOL_IDS, TOOL_META } from '@shared/types'
 import { useMonitor } from '../store/monitor'
 import { useNow } from '../hooks/useTicker'
@@ -66,6 +66,8 @@ export function Tasks(): JSX.Element {
   const [customFrom, setCustomFrom] = useState(() => localDay(Date.now() - 6 * 86_400_000))
   const [customTo, setCustomTo] = useState(() => localDay(Date.now()))
   const [keyword, setKeyword] = useState('')
+  const [sortBy, setSortBy] = useState<TaskSortKey>('start')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [rows, setRows] = useState<import('@shared/types').TaskSnapshot[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -85,10 +87,12 @@ export function Tasks(): JSX.Element {
       from,
       to,
       keyword: keyword.trim() || undefined,
+      sortBy,
+      sortDir,
       limit: 300,
       offset: 0
     }
-  }, [tools, status, range, customFrom, customTo, keyword])
+  }, [tools, status, range, customFrom, customTo, keyword, sortBy, sortDir])
 
   useEffect(() => {
     let disposed = false
@@ -107,6 +111,15 @@ export function Tasks(): JSX.Element {
       if (debounceRef.current) window.clearTimeout(debounceRef.current)
     }
   }, [query, signedAt])
+
+  const handleSort = (key: TaskSortKey): void => {
+    if (key === sortBy) {
+      setSortDir((prev) => (prev === 'desc' ? 'asc' : 'desc'))
+      return
+    }
+    setSortBy(key)
+    setSortDir(key === 'title' || key === 'tool' ? 'asc' : 'desc')
+  }
 
   const toggleTool = (tool: ToolId): void => {
     setTools((prev) => (prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool]))
@@ -242,7 +255,16 @@ export function Tasks(): JSX.Element {
       </Card>
 
       <Card className="p-0">
-        <TaskTable tasks={rows} currency={currency} fxRate={fxRate} now={now} onOpen={openDrawer} />
+        <TaskTable
+          tasks={rows}
+          currency={currency}
+          fxRate={fxRate}
+          now={now}
+          onOpen={openDrawer}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={handleSort}
+        />
       </Card>
     </div>
   )

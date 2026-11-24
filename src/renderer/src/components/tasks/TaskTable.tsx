@@ -1,4 +1,4 @@
-import type { Currency, TaskSnapshot } from '@shared/types'
+import type { Currency, TaskSnapshot, TaskSortKey } from '@shared/types'
 import {
   computeCacheHitRate,
   formatDuration,
@@ -16,15 +16,15 @@ import {
 import { cn, statusTone, toolName } from '../../lib/utils'
 import { StatusDot, ToolAvatar } from '../ui/atoms'
 
-const COLUMNS = [
-  { key: 'task', label: '任务', className: 'w-[38%]' },
+const COLUMNS: Array<{ key: TaskSortKey; label: string; className: string; numeric?: boolean }> = [
+  { key: 'title', label: '任务', className: 'w-[38%]' },
   { key: 'tool', label: '工具', className: 'w-[128px]' },
   { key: 'start', label: '本轮开始', className: 'w-[112px]' },
-  { key: 'duration', label: '本轮耗时', className: 'w-[96px]' },
-  { key: 'input', label: '输入', className: 'w-[76px] text-right' },
-  { key: 'output', label: '输出', className: 'w-[76px] text-right' },
-  { key: 'cache', label: '缓存命中', className: 'w-[96px] text-right' },
-  { key: 'cost', label: '费用', className: 'w-[88px] text-right' },
+  { key: 'duration', label: '本轮耗时', className: 'w-[96px]', numeric: true },
+  { key: 'input', label: '输入', className: 'w-[76px] text-right', numeric: true },
+  { key: 'output', label: '输出', className: 'w-[76px] text-right', numeric: true },
+  { key: 'cache', label: '缓存命中', className: 'w-[96px] text-right', numeric: true },
+  { key: 'cost', label: '费用', className: 'w-[88px] text-right', numeric: true },
   { key: 'status', label: '状态', className: 'w-[92px] text-right' }
 ]
 
@@ -33,30 +33,53 @@ export function TaskTable({
   currency,
   fxRate,
   now,
-  onOpen
+  onOpen,
+  sortBy,
+  sortDir,
+  onSort
 }: {
   tasks: TaskSnapshot[]
   currency: Currency
   fxRate: number
   now: number
   onOpen: (id: string) => void
+  sortBy: TaskSortKey
+  sortDir: 'asc' | 'desc'
+  onSort: (key: TaskSortKey) => void
 }): JSX.Element {
   return (
     <div className="overflow-hidden rounded-xl border border-white/[0.05]">
       <table className="w-full table-fixed border-collapse text-body">
         <thead>
           <tr className="bg-white/[0.025]">
-            {COLUMNS.map((col) => (
-              <th
-                key={col.key}
-                className={cn(
-                  'px-3 py-2 text-left text-caption font-medium text-fg-lo whitespace-nowrap',
-                  col.className
-                )}
-              >
-                {col.label}
-              </th>
-            ))}
+            {COLUMNS.map((col) => {
+              const active = sortBy === col.key
+              return (
+                <th
+                  key={col.key}
+                  className={cn(
+                    'px-3 py-2 text-left text-caption font-medium whitespace-nowrap',
+                    col.className
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSort(col.key)}
+                    title={`按「${col.label}」${active && sortDir === 'desc' ? '正序' : '倒序'}排序`}
+                    className={cn(
+                      'inline-flex items-center gap-1 transition-colors',
+                      col.numeric && 'flex-row-reverse',
+                      active ? 'text-fg-hi' : 'text-fg-lo hover:text-fg-mid'
+                    )}
+                  >
+                    <span>{col.label}</span>
+                    <span className={cn('text-[9px]', active ? 'opacity-100' : 'opacity-0')}>
+                      {sortDir === 'asc' ? '▲' : '▼'}
+                    </span>
+                  </button>
+                </th>
+              )
+            })}
           </tr>
         </thead>
         <tbody>

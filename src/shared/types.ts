@@ -269,7 +269,21 @@ export interface PricingRow {
   peakWeekdaysOnly?: boolean
 }
 
+export type TaskSortKey =
+  | 'title'
+  | 'tool'
+  | 'start'
+  | 'duration'
+  | 'input'
+  | 'output'
+  | 'cache'
+  | 'cost'
+  | 'status'
+
 export interface TaskQuery {
+  /** 排序列；缺省按「本轮开始」倒序 */
+  sortBy?: TaskSortKey
+  sortDir?: 'asc' | 'desc'
   tools?: ToolId[]
   statuses?: TaskStatus[]
   from?: number
