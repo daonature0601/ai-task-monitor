@@ -291,7 +291,7 @@ export function queryTasks(
     .prepare(
       `SELECT * FROM tasks WHERE ${whereSql}
        ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
-                last_event_at DESC
+                COALESCE(turn_started_at, started_at) DESC
        LIMIT @limit OFFSET @offset`
     )
     .all({ ...params, limit, offset }) as TaskRow[]

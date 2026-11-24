@@ -236,10 +236,12 @@ export function createRuntime(
          cache_read_tokens = COALESCE((SELECT SUM(e.cache_read_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
          cache_write_tokens = COALESCE((SELECT SUM(e.cache_write_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
          event_count = COALESCE((SELECT COUNT(*) FROM usage_events e WHERE e.task_id = tasks.id), 0),
-         cost_usd = COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0)
+         cost_usd = COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+         last_event_at = MAX(last_event_at, COALESCE((SELECT MAX(e.ts) FROM usage_events e WHERE e.task_id = tasks.id), 0))
        WHERE ABS(input_tokens - COALESCE((SELECT SUM(e.input_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0)) > 1
           OR ABS(cache_read_tokens - COALESCE((SELECT SUM(e.cache_read_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0)) > 1
-          OR ABS(cost_usd - COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0)) > 0.01`
+          OR ABS(cost_usd - COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0)) > 0.01
+          OR last_event_at < COALESCE((SELECT MAX(e.ts) FROM usage_events e WHERE e.task_id = tasks.id), 0) - 1000`
     )
     .run()
   if (reconciled.changes > 0) console.log(`[db] reconciled ${reconciled.changes} task totals`)
