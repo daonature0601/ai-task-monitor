@@ -321,7 +321,14 @@ export class TaskMachine {
     // （IDE 类数据源的 token 都记在基础 id 上，切出去的分身永远没有用量）。
     if (task) {
       const anchor = task.lastStateAt ?? task.startedAt
-      if (!signal.keepSession && task.status === 'ended' && eventTs - anchor > BURST_GAP_MS) {
+      // io 信号只是「文件正在被读写」，不是新一段工作的证据；
+      // 用它切分会把同一会话拆成 `~时间戳` 分身（Codex 常见）
+      if (
+        !signal.keepSession &&
+        signal.source !== 'io' &&
+        task.status === 'ended' &&
+        eventTs - anchor > BURST_GAP_MS
+      ) {
         task = undefined
         taskId = `${baseId}~${eventTs}`
       }

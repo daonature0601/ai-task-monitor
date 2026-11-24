@@ -21,7 +21,7 @@ import { parseDshSession } from '../collectors/dsh-session-reader'
  * 读不到的会话回落到任务上保存的本轮边界，保证每个任务至少有一轮。
  */
 
-export const TURNS_VERSION = 41
+export const TURNS_VERSION = 42
 
 interface Span {
   tool: string
