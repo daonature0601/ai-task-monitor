@@ -225,6 +225,25 @@ export function createRuntime(
     )
   }
 
+  // 任务行的 token / 费用必须等于事件之和。合并任务、重扫、游标重置都可能
+  // 让两者短暂不一致（本轮有 3.25M 而会话累计只有 1.01M 就是这么来的）。
+  // 每次启动只修正「不一致」的行，代价很小。
+  const reconciled = db
+    .prepare(
+      `UPDATE tasks SET
+         input_tokens = COALESCE((SELECT SUM(e.input_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+         output_tokens = COALESCE((SELECT SUM(e.output_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+         cache_read_tokens = COALESCE((SELECT SUM(e.cache_read_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+         cache_write_tokens = COALESCE((SELECT SUM(e.cache_write_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+         event_count = COALESCE((SELECT COUNT(*) FROM usage_events e WHERE e.task_id = tasks.id), 0),
+         cost_usd = COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0)
+       WHERE ABS(input_tokens - COALESCE((SELECT SUM(e.input_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0)) > 1
+          OR ABS(cache_read_tokens - COALESCE((SELECT SUM(e.cache_read_tokens) FROM usage_events e WHERE e.task_id = tasks.id), 0)) > 1
+          OR ABS(cost_usd - COALESCE((SELECT SUM(e.cost_usd) FROM usage_events e WHERE e.task_id = tasks.id), 0)) > 0.01`
+    )
+    .run()
+  if (reconciled.changes > 0) console.log(`[db] reconciled ${reconciled.changes} task totals`)
+
   const machine = new TaskMachine({ settings: () => settings, pricing: () => pricing })
   machine.hydrate(listRecentTasks(db, 800))
   // 心跳事件不再计入 event_count：清零历史遗留计数，
