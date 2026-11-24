@@ -295,6 +295,41 @@ export class CodexAdapter extends BaseAdapter {
     this.markIo(session, meta)
 
 
+    // 用户消息 = 一轮的开始（与重建规则一致）：
+    // Codex 的 task_started 只在新任务时发，一轮内追问不会重发，
+    // 只靠它记录轮次会少算，因此这里显式按用户消息开轮。
+    if (type === 'response_item' && payload) {
+      const kind = typeof payload.type === 'string' ? payload.type : ''
+      if (kind === 'message' && payload.role === 'user') {
+        const blocks = Array.isArray(payload.content) ? payload.content : []
+        const text = blocks
+          .map((block) => (block && typeof block === 'object' ? String((block as Record<string, unknown>).text ?? '') : ''))
+          .join('')
+        const injected =
+          !text || text.includes('environment_context') || text.includes('<user_instructions>')
+        if (!injected) {
+          const ts = parseTs(obj.timestamp) ?? Date.now()
+          this.push({
+            tool: this.id,
+            externalSessionId: session.sessionId,
+            ts,
+            title: this.titleFor(session),
+            workspace: session.cwd,
+            project: this.projectFor(session),
+            model: session.model,
+            authoritativeTitle: true,
+            tokensSource: 'unavailable',
+            skipEventLog: true,
+            turnStart: true,
+            allowCreate: true,
+            keepSession: true,
+            dedupeKey: `turn:user:${ts}`,
+            ...emptyUsage()
+          })
+        }
+      }
+    }
+
     // Codex 自带的任务边界事件：task_started 是本轮开始，task_complete 是本轮结束
     if (type === 'event_msg' && payload) {
       const kind = typeof payload.type === 'string' ? payload.type : ''
