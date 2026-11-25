@@ -71,7 +71,7 @@ export class JsonlTailer {
 
     // 兜底：chokidar 可能因高频事件或系统限制而停止回调，
     // 定时 stat 一次已知文件，发现 size > cursor 就主动补读，避免永久停摆。
-    const interval = this.options.fallbackSweepMs ?? 60_000
+    const interval = this.options.fallbackSweepMs ?? 20_000
     this.sweepTimer = setInterval(() => {
       void this.sweep()
     }, interval)
@@ -210,11 +210,13 @@ export class JsonlTailer {
 
   /**
    * 兜底轮询：只 stat 文件并与游标比对，不做全量解析。
-   * 若最近 1 分钟内有正常读取（watcher 仍工作），本轮直接跳过。
+   *
+   * 不能因为「最近有读取」就整轮跳过：watcher 可能只对某些文件失效
+   * （大文件 / 高频写入），而其它文件仍在正常读取，全局时间戳看不出差异。
+   * 因此每轮都逐个文件比对 size 与游标。
    */
   private async sweep(): Promise<void> {
     if (this.stopped) return
-    if (Date.now() - this.lastReadAt < 60_000) return
 
     for (const root of this.options.roots.filter(Boolean)) {
       let files: string[]

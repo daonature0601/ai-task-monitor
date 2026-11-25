@@ -278,8 +278,9 @@ export function createRuntime(
     emit: (delta) => {
       const result = machine.ingest(delta)
       if (!result.applied) return
-      // 心跳类事件只用于维持活跃度，不写入用量流水（否则每 30s 一行纯噪声）
-      if (delta.skipEventLog) return
+      // 心跳类事件只用于维持活跃度，不写入用量流水（否则每 30s 一行纯噪声）；
+      // 但轮次边界必须放行 —— 它们同样不产生用量，却要落到 task_turns
+      if (delta.skipEventLog && !delta.turnStart && !delta.turnEnd) return
       writer.enqueue(result.taskId, delta, machine.getTask(result.taskId)?.model)
     },
     emitState: (signal) => {
