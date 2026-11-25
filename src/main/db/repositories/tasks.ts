@@ -261,7 +261,8 @@ export function queryTasks(
   if (query.from) {
     // 时间筛选与列表展示的「本轮开始」保持同一口径：
     // 只按会话起点过滤，会让「今天开始的一轮、昨天开的会话」漏掉
-    where.push('COALESCE(turn_started_at, started_at) >= @from')
+    // 本轮开始落在区间内，或区间内仍有活动（跨天仍在运行的任务）
+    where.push('(COALESCE(turn_started_at, started_at) >= @from OR last_event_at >= @from)')
     params.from = query.from
   }
   if (query.to) {
