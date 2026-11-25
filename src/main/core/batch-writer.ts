@@ -105,6 +105,17 @@ export class BatchWriter {
       }
       // 轮次先落库：turnStart 要闭合上一条并插入新行，turnEnd 闭合当前行
       this.flushTurns(db)
+      // 有新的用量落在「已闭合的最后一轮」之后，说明那一轮其实还在继续：
+      // 重新打开它，否则这些事件不属于任何轮次，界面会显示成本轮 0 用量
+      const reopen = db.prepare(
+        `UPDATE task_turns SET ended_at = NULL
+          WHERE task_id = ? AND ended_at IS NOT NULL AND ended_at < ?`
+      )
+      const latestByTask = new Map<string, number>()
+      for (const row of pending) {
+        latestByTask.set(row.taskId, Math.max(latestByTask.get(row.taskId) ?? 0, row.ts))
+      }
+      for (const [taskId, ts] of latestByTask) reopen.run(taskId, ts)
       if (pending.length > 0) {
         events = insertUsageEvents(db, pending)
         this.insertedTotal += events
