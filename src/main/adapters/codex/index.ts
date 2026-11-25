@@ -308,7 +308,9 @@ export class CodexAdapter extends BaseAdapter {
         const injected =
           !text || text.includes('environment_context') || text.includes('<user_instructions>')
         if (!injected) {
-          const ts = parseTs(obj.timestamp) ?? Date.now()
+          // 续写/恢复的文件会把历史与新消息统一写成 fork 时刻，
+          // 用它开轮会和已有轮次撞在一起；实时读取一律用当前挂钟时间
+          const ts = Date.now()
           this.push({
             tool: this.id,
             externalSessionId: session.sessionId,
@@ -352,6 +354,7 @@ export class CodexAdapter extends BaseAdapter {
           // 也会发，用它开新轮会比软件里多出一轮
           turnStart: false,
           turnEnd: kind === 'task_complete',
+          forceActive: kind === 'task_started',
           // 新会话的首个 task_started 必须立刻建任务，否则实时任务里看不到
           allowCreate: kind === 'task_started',
           // 回合结束即任务结束：Codex 桌面端显示"对话执行完成"时，

@@ -53,6 +53,8 @@ export interface TokenUsage {
 export interface UsageDelta extends TokenUsage {
   /** 允许仅凭这条信号创建任务（心跳 / 标题默认不行，Codex 的 task_started 可以） */
   allowCreate?: boolean
+  /** 强制把任务标记为运行中（新的开始信号把任务从 ended 拉回 running） */
+  forceActive?: boolean
   tool: ToolId
   externalSessionId: string
   ts: number
@@ -224,6 +226,8 @@ export interface StateSignal {
    * 但 Codex 的 task_started 是真实的回合边界，需要立即建任务。
    */
   allowCreate?: boolean
+  /** 强制把任务标记为运行中（收到新的开始信号时，从 ended 拉回 running） */
+  forceActive?: boolean
   /** 同一会话的多次活动始终归入同一任务（IDE 类数据源：一次对话就是一个任务） */
   keepSession?: boolean
   /** 会话真实开始时间，hook / 心跳可提供 */

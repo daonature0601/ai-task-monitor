@@ -285,11 +285,18 @@ export class TaskMachine {
     // 无任何运行时通道时（stateSource === 'none'）才回落到日志推断，
     // 且该任务会被标记来源，界面上可区分「Hook 状态」与「日志推断」。
     const logInferred = task.stateSource === 'none' && !backfillEnded && !delta.endSignal
+    // 已结束的任务又来了新用量：说明会话被续写 / 重新开始，拉回运行中
+    const resumed = task.status === 'ended' && eventTs > (task.endedAt ?? 0) + 1_000
+    if (resumed) {
+      task.status = 'running'
+      task.endedAt = undefined
+    }
+
     if (delta.endSignal || backfillEnded) {
       task.endedAt = task.lastEventAt
       task.durationMs = Math.max(0, task.lastEventAt - task.startedAt)
       task.status = 'ended'
-    } else if (logInferred) {
+    } else if (logInferred || delta.forceActive) {
       task.status = 'running'
       task.endedAt = undefined
     }
