@@ -308,9 +308,13 @@ export class CodexAdapter extends BaseAdapter {
         const injected =
           !text || text.includes('environment_context') || text.includes('<user_instructions>')
         if (!injected) {
-          // 续写/恢复的文件会把历史与新消息统一写成 fork 时刻，
-          // 用它开轮会和已有轮次撞在一起；实时读取一律用当前挂钟时间
-          const ts = Date.now()
+          // 压缩 / 恢复的文件会把历史消息整段重放。这类行的 timestamp 很旧，
+          // 用它开轮会产生一串「刚创建就是 0 用量」的假轮次；
+          // 只把「最近 10 分钟内」的消息当作真实的新输入。
+          const parsed = parseTs(obj.timestamp)
+          const fresh = parsed && Date.now() - parsed < 10 * 60_000
+          if (!fresh) return
+          const ts = parsed
           this.push({
             tool: this.id,
             externalSessionId: session.sessionId,
